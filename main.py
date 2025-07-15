@@ -46,7 +46,7 @@ def process_batches(model, data_handler, batch_size, optimizer, criterion, is_tr
 if __name__ == '__main__':
     # --- Configuration ---
     config = {
-        'max_words': 50000,
+        'max_words': 100000,
         'vocab_size': 1000,
         'embedding_dim': 512,
         'num_blocks': 2,  # Number of repeated Reservoir Blocks
