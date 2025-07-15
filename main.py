@@ -48,13 +48,13 @@ if __name__ == '__main__':
     config = {
         'max_words': 50000,
         'vocab_size': 1000,
-        'embedding_dim': 256,
+        'embedding_dim': 512,
         'num_blocks': 2,  # Number of repeated Reservoir Blocks
         'reservoirs_per_block': [
-            {'name': 'short', 'window_size': 5, 'reservoir_size': 128, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
-            {'name': 'long',  'window_size': 8, 'reservoir_size': 128, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
-            {'name': 'fast_dynamics', 'window_size': 6, 'reservoir_size': 128, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
-            {'name': 'long_memory', 'window_size': 10, 'reservoir_size': 128, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
+            {'name': 'short', 'window_size': 5, 'reservoir_size': 256, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
+            {'name': 'long',  'window_size': 8, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
+            {'name': 'fast_dynamics', 'window_size': 6, 'reservoir_size': 256, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
+            {'name': 'long_memory', 'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
         ],
         'readout_hidden_size': 128,
         'epochs': 100,
