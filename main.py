@@ -52,12 +52,16 @@ if __name__ == '__main__':
         'num_blocks': 2,  # Number of repeated Reservoir Blocks
         'reservoirs_per_block': [
             {'name': 'short', 'window_size': 5, 'reservoir_size': 256, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
+            {'name': 'long',  'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
+            {'name': 'short', 'window_size': 7, 'reservoir_size': 256, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
             {'name': 'long',  'window_size': 8, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
             {'name': 'fast_dynamics', 'window_size': 6, 'reservoir_size': 256, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
             {'name': 'long_memory', 'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
+            {'name': 'fast_dynamics', 'window_size': 3, 'reservoir_size': 256, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
+            {'name': 'long_memory', 'window_size': 15, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
         ],
         'readout_hidden_size': 128,
-        'epochs': 100,
+        'epochs': 20,
         'batch_size': 32,
         'block_size': 64, # Sequence length per batch
         'learning_rate': 0.001,
