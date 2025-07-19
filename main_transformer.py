@@ -2,10 +2,10 @@ import time
 import torch
 import numpy as np
 import torch.nn as nn
-import reservoirpy as rpy
 import matplotlib.pyplot as plt
 
-from model import DeepReservoirModel
+# Note: We import the new TransformerModel
+from model_transformer import TransformerModel
 from data_handler import DataHandler
 
 def process_batches(model, data_handler, batch_size, optimizer, criterion, is_training, device):
@@ -18,20 +18,22 @@ def process_batches(model, data_handler, batch_size, optimizer, criterion, is_tr
         model.eval()
 
     total_loss = 0
+    # Calculate the number of batches based on total tokens and sequence length
     num_batches = len(data_handler._get_split_indices(split)) // (batch_size * data_handler.block_size)
     if num_batches == 0: return float('inf')
 
-    for _ in range(num_batches): # Simplified loop for demonstration
+    for _ in range(num_batches):
         x, y = data_handler.get_batch(split)
         x, y = x.to(device), y.to(device)
 
         if is_training:
             optimizer.zero_grad()
             logits = model(x)
-            # Reshape for CrossEntropyLoss: (N, C) where N is total tokens
             B, T, C = logits.shape
             loss = criterion(logits.view(B * T, C), y.view(B * T))
             loss.backward()
+            # Clip gradients to prevent exploding gradients, a common practice for Transformers
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             optimizer.step()
         else:
             with torch.no_grad():
@@ -53,14 +55,16 @@ def generate(model, data_handler, context_str, max_new_tokens, device):
     # Add a batch dimension and send to the correct device
     context = torch.tensor(start_indices, dtype=torch.long, device=device).unsqueeze(0)
 
-    print(f"\n--- Starting Generation from Reservoir Model ---")
+    print(f"\n--- Starting Generation from Transformer Model ---")
     print(f"Prompt: '{context_str}'")
     
     # Generate new tokens autoregressively
     with torch.no_grad():
         for _ in range(max_new_tokens):
             # The model predicts logits for the next token in the sequence
-            logits = model(context)
+            # For the transformer, we must ensure we don't exceed the block size
+            context_cond = context if context.size(1) <= config['block_size'] else context[:, -config['block_size']:]
+            logits = model(context_cond)
             # We only care about the prediction for the very last token
             logits = logits[:, -1, :] # Shape becomes (batch=1, vocab_size)
             # Apply softmax to get probabilities
@@ -78,50 +82,40 @@ def generate(model, data_handler, context_str, max_new_tokens, device):
     print(generated_text)
     print("------------------------\n")
 
-
 if __name__ == '__main__':
-    # --- Configuration ---
+    # --- Configuration for the Transformer Baseline ---
+    # These parameters are chosen to be comparable to the reservoir model's complexity
     config = {
         'max_words': 50000,
         'vocab_size': 1000,
-        'embedding_dim': 512,
-        'num_blocks': 4,  # Number of repeated Reservoir Blocks
-        'reservoirs_per_block': [
-            {'name': 'short', 'window_size': 5, 'reservoir_size': 64, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
-            {'name': 'long',  'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
-            {'name': 'short', 'window_size': 7, 'reservoir_size': 128, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
-            {'name': 'long',  'window_size': 8, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
-            {'name': 'fast_dynamics', 'window_size': 6, 'reservoir_size': 512, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
-            {'name': 'long_memory', 'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
-            {'name': 'fast_dynamics', 'window_size': 3, 'reservoir_size': 256, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
-            {'name': 'long_memory', 'window_size': 15, 'reservoir_size': 32, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
-        ],
-        'readout_hidden_size': 128,
-        'epochs': 1,
+        'embedding_dim': 512,   # d_model in Transformer terminology
+        'num_blocks': 4,        # Number of Transformer Encoder Layers
+        'num_heads': 8,         # Number of attention headss
+        'ff_dim': 2048,         # Dimension of the feed-forward network (often 4*d_model)
+        'dropout': 0.1,
+        'epochs': 5,
         'batch_size': 32,
-        'block_size': 64, # Sequence length per batch
+        'block_size': 64,       # Sequence length per batch
         'learning_rate': 0.001,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }
-
-    rpy.verbosity(0)
     
-    # --- 1. Data Handling ---
+    # --- 1. Data Handling (reusing the same DataHandler) ---
     data_handler = DataHandler(config)
 
     # --- 2. Model Initialization ---
-    model = DeepReservoirModel(
+    model = TransformerModel(
         vocab_size=data_handler.get_vocab_size(),
         config=config
     ).to(config['device'])
     
-    print(f"Model initialized on {config['device']} with {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters.")
+    print(f"Transformer Model initialized on {config['device']} with {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters.")
     
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
 
     # --- 3. Training Loop ---
-    print("Starting training loop...")
+    print("Starting Transformer training loop...")
     train_losses = []
     val_losses = []
 
@@ -140,10 +134,10 @@ if __name__ == '__main__':
     plt.plot(val_losses, label='Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.title('Training and Validation Loss over Epochs (Deep Model)')
+    plt.title('Training and Validation Loss over Epochs (Transformer Baseline)')
     plt.legend()
     plt.grid(True)
-    plt.savefig('training_loss_deep_model.png')
+    plt.savefig('training_loss_transformer_baseline.png')
     
     # Only try to show the plot if in an interactive environment
     import matplotlib
