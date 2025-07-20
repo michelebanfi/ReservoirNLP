@@ -97,7 +97,7 @@ if __name__ == '__main__':
             {'name': 'long_memory', 'window_size': 15, 'reservoir_size': 32, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
         ],
         'readout_hidden_size': 128,
-        'epochs': 1,
+        'epochs': 10,
         'batch_size': 32,
         'block_size': 64, # Sequence length per batch
         'learning_rate': 0.001,

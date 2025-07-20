@@ -93,7 +93,7 @@ if __name__ == '__main__':
         'num_heads': 8,         # Number of attention headss
         'ff_dim': 2048,         # Dimension of the feed-forward network (often 4*d_model)
         'dropout': 0.1,
-        'epochs': 5,
+        'epochs': 10,
         'batch_size': 32,
         'block_size': 64,       # Sequence length per batch
         'learning_rate': 0.001,
