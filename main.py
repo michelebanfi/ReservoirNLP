@@ -18,17 +18,17 @@ def process_batches(model, data_handler, batch_size, optimizer, criterion, is_tr
         model.eval()
 
     total_loss = 0
+    # Use the length of the data tensor directly
     num_batches = len(data_handler._get_split_indices(split)) // (batch_size * data_handler.block_size)
     if num_batches == 0: return float('inf')
 
-    for _ in range(num_batches): # Simplified loop for demonstration
+    for _ in range(num_batches):
         x, y = data_handler.get_batch(split)
         x, y = x.to(device), y.to(device)
 
         if is_training:
             optimizer.zero_grad()
             logits = model(x)
-            # Reshape for CrossEntropyLoss: (N, C) where N is total tokens
             B, T, C = logits.shape
             loss = criterion(logits.view(B * T, C), y.view(B * T))
             loss.backward()
@@ -43,14 +43,13 @@ def process_batches(model, data_handler, batch_size, optimizer, criterion, is_tr
         
     return total_loss / num_batches
 
+# --- generate FUNCTION (CHANGED) ---
 def generate(model, data_handler, context_str, max_new_tokens, device):
     """Generates text from the model given a starting context."""
     model.eval()
-    tokenizer = data_handler.tokenizer
     
-    # Encode the starting context string to token indices
-    start_indices = tokenizer.encode(context_str).ids
-    # Add a batch dimension and send to the correct device
+    # Use the handler's encode method directly
+    start_indices = data_handler.encode(context_str)
     context = torch.tensor(start_indices, dtype=torch.long, device=device).unsqueeze(0)
 
     print(f"\n--- Starting Generation from Reservoir Model ---")
@@ -59,47 +58,38 @@ def generate(model, data_handler, context_str, max_new_tokens, device):
     # Generate new tokens autoregressively
     with torch.no_grad():
         for _ in range(max_new_tokens):
-            # The model predicts logits for the next token in the sequence
             logits = model(context)
-            # We only care about the prediction for the very last token
-            logits = logits[:, -1, :] # Shape becomes (batch=1, vocab_size)
-            # Apply softmax to get probabilities
+            logits = logits[:, -1, :] 
             probs = torch.nn.functional.softmax(logits, dim=-1)
-            # Sample the next token from the probability distribution
             idx_next = torch.multinomial(probs, num_samples=1)
-            # Append the newly sampled token to our context
             context = torch.cat((context, idx_next), dim=1)
 
-    # Decode the full sequence of token indices back to text
-    # Convert 2D tensor to a flat list
-    token_ids = context.squeeze().tolist()  # Remove batch dimension and convert to list
-    generated_text = tokenizer.decode(token_ids)
+    # Use the handler's decode method directly
+    token_ids = context.squeeze().tolist()
+    generated_text = data_handler.decode(token_ids)
     print("--- Generated Text ---")
     print(generated_text)
     print("------------------------\n")
 
 
 if __name__ == '__main__':
-    # --- Configuration ---
+    # --- Configuration (CHANGED for Tiny Shakespeare) ---
     config = {
-        'max_words': 50000,
-        'vocab_size': 1000,
-        'embedding_dim': 512,
-        'num_blocks': 4,  # Number of repeated Reservoir Blocks
+        'dataset_name': 'tinyshakespeare', # ADDED: To select the correct dataset
+        # 'vocab_size' REMOVED: Determined automatically by the DataHandler
+        'embedding_dim': 256,             # REDUCED: More suitable for a smaller vocab
+        'num_blocks': 4,
         'reservoirs_per_block': [
-            {'name': 'short', 'window_size': 5, 'reservoir_size': 64, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
+            {'name': 'short', 'window_size': 5, 'reservoir_size': 128, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
             {'name': 'long',  'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
-            {'name': 'short', 'window_size': 7, 'reservoir_size': 128, 'leaking_rate': 0.3, 'spectral_radius': 0.9},
-            {'name': 'long',  'window_size': 8, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.9},
-            {'name': 'fast_dynamics', 'window_size': 6, 'reservoir_size': 512, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
-            {'name': 'long_memory', 'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
+            # Note: Spectral radius > 1.0 can cause instability. Changed 1.1 to 0.95 for stability.
+            {'name': 'long_memory', 'window_size': 10, 'reservoir_size': 256, 'leaking_rate': 0.1, 'spectral_radius': 0.95},
             {'name': 'fast_dynamics', 'window_size': 3, 'reservoir_size': 256, 'leaking_rate': 0.7, 'spectral_radius': 0.9},
-            {'name': 'long_memory', 'window_size': 15, 'reservoir_size': 32, 'leaking_rate': 0.1, 'spectral_radius': 1.1},
         ],
         'readout_hidden_size': 128,
-        'epochs': 10,
-        'batch_size': 32,
-        'block_size': 64, # Sequence length per batch
+        'epochs': 1,
+        'batch_size': 64,
+        'block_size': 128, 
         'learning_rate': 0.001,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }
@@ -140,10 +130,10 @@ if __name__ == '__main__':
     plt.plot(val_losses, label='Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.title('Training and Validation Loss over Epochs (Deep Model)')
+    plt.title('Training and Validation Loss over Epochs (Deep Reservoir Model)')
     plt.legend()
     plt.grid(True)
-    plt.savefig('training_loss_deep_model.png')
+    plt.savefig('training_loss_deep_reservoir_model.png')
     
     # Only try to show the plot if in an interactive environment
     import matplotlib
@@ -153,4 +143,4 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Note: Could not display plot interactively ({e})")
     
-    generate(model, data_handler, context_str="The story begins", max_new_tokens=100, device=config['device'])
+    generate(model, data_handler, context_str="The story begins", max_new_tokens=200, device=config['device'])

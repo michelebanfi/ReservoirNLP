@@ -48,11 +48,11 @@ def process_batches(model, data_handler, batch_size, optimizer, criterion, is_tr
 def generate(model, data_handler, context_str, max_new_tokens, device):
     """Generates text from the model given a starting context."""
     model.eval()
-    tokenizer = data_handler.tokenizer
     
-    # Encode the starting context string to token indices
-    start_indices = tokenizer.encode(context_str).ids
-    # Add a batch dimension and send to the correct device
+    # OLD way: tokenizer = data_handler.tokenizer
+    # OLD way: start_indices = tokenizer.encode(context_str).ids
+    # NEW way: Use the handler's encode method directly
+    start_indices = data_handler.encode(context_str)
     context = torch.tensor(start_indices, dtype=torch.long, device=device).unsqueeze(0)
 
     print(f"\n--- Starting Generation from Transformer Model ---")
@@ -61,23 +61,18 @@ def generate(model, data_handler, context_str, max_new_tokens, device):
     # Generate new tokens autoregressively
     with torch.no_grad():
         for _ in range(max_new_tokens):
-            # The model predicts logits for the next token in the sequence
-            # For the transformer, we must ensure we don't exceed the block size
             context_cond = context if context.size(1) <= config['block_size'] else context[:, -config['block_size']:]
             logits = model(context_cond)
-            # We only care about the prediction for the very last token
-            logits = logits[:, -1, :] # Shape becomes (batch=1, vocab_size)
-            # Apply softmax to get probabilities
+            logits = logits[:, -1, :]
             probs = torch.nn.functional.softmax(logits, dim=-1)
-            # Sample the next token from the probability distribution
             idx_next = torch.multinomial(probs, num_samples=1)
-            # Append the newly sampled token to our context
             context = torch.cat((context, idx_next), dim=1)
 
-    # Decode the full sequence of token indices back to text
-    # Convert 2D tensor to a flat list
-    token_ids = context.squeeze().tolist()  # Remove batch dimension and convert to list
-    generated_text = tokenizer.decode(token_ids)
+    # OLD way: generated_text = tokenizer.decode(token_ids)
+    # NEW way: Use the handler's decode method directly
+    token_ids = context.squeeze().tolist()
+    generated_text = data_handler.decode(token_ids)
+    
     print("--- Generated Text ---")
     print(generated_text)
     print("------------------------\n")
@@ -92,7 +87,7 @@ if __name__ == '__main__':
         'num_heads': 2,         # Number of attention headss
         'ff_dim': 128,         # Dimension of the feed-forward network (often 4*d_model)
         'dropout': 0.1,
-        'epochs': 1,
+        'epochs': 10,
         'batch_size': 32,
         'block_size': 64,       # Sequence length per batch
         'learning_rate': 0.001,
