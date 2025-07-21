@@ -86,14 +86,13 @@ if __name__ == '__main__':
     # --- Configuration for the Transformer Baseline ---
     # These parameters are chosen to be comparable to the reservoir model's complexity
     config = {
-        'max_words': 50000,
-        'vocab_size': 1000,
+        'dataset_name': 'tinyshakespeare', 
         'embedding_dim': 512,   # d_model in Transformer terminology
-        'num_blocks': 4,        # Number of Transformer Encoder Layers
-        'num_heads': 8,         # Number of attention headss
-        'ff_dim': 2048,         # Dimension of the feed-forward network (often 4*d_model)
+        'num_blocks': 2,        # Number of Transformer Encoder Layers
+        'num_heads': 2,         # Number of attention headss
+        'ff_dim': 128,         # Dimension of the feed-forward network (often 4*d_model)
         'dropout': 0.1,
-        'epochs': 10,
+        'epochs': 1,
         'batch_size': 32,
         'block_size': 64,       # Sequence length per batch
         'learning_rate': 0.001,
@@ -113,22 +112,40 @@ if __name__ == '__main__':
     
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
+    
+    # Adding Cosine Annealing Learning Rate Scheduler
+    # T_max is set to the number of epochs, eta_min is the minimum learning rate
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=config['epochs'], 
+        eta_min=config['learning_rate'] * 0.01  # Minimum LR will be 1% of initial LR
+    )
 
     # --- 3. Training Loop ---
     print("Starting Transformer training loop...")
     train_losses = []
     val_losses = []
+    learning_rates = []  # Track learning rates for plotting
 
     for epoch in range(config['epochs']):
+        # Get current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        learning_rates.append(current_lr)
+        
         avg_train_loss = process_batches(model, data_handler, config['batch_size'], optimizer, criterion, is_training=True, device=config['device'])
         train_losses.append(avg_train_loss)
         
         avg_val_loss = process_batches(model, data_handler, config['batch_size'], optimizer, criterion, is_training=False, device=config['device'])
         val_losses.append(avg_val_loss)
         
-        print(f"Epoch {epoch + 1}/{config['epochs']}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+        # Step the scheduler after each epoch
+        if scheduler is not None:
+            scheduler.step()
+        
+        print(f"Epoch {epoch + 1}/{config['epochs']}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, LR: {current_lr:.6f}")
 
     # --- 4. Plotting ---
+    # Plot 1: Training and Validation Loss
     plt.figure(figsize=(10, 6))
     plt.plot(train_losses, label='Train Loss')
     plt.plot(val_losses, label='Validation Loss')
@@ -138,6 +155,15 @@ if __name__ == '__main__':
     plt.legend()
     plt.grid(True)
     plt.savefig('training_loss_transformer_baseline.png')
+    
+    # Plot 2: Learning Rate Schedule
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, config['epochs'] + 1), learning_rates, 'o-')
+    plt.xlabel('Epoch')
+    plt.ylabel('Learning Rate')
+    plt.title('Cosine Annealing Learning Rate Schedule')
+    plt.grid(True)
+    plt.savefig('transformer_lr_schedule.png')
     
     # Only try to show the plot if in an interactive environment
     import matplotlib
