@@ -423,10 +423,15 @@ def create_optimized_reservoir_config(shared_config, train_loader):
     
     # Calculate training steps based on actual dataset
     steps_per_epoch = len(train_loader)
-    total_steps = steps_per_epoch * shared_config['EPOCHS']
+    
+    # FIXED: Account for gradient accumulation in total steps calculation
+    accumulation_steps = 4  # Define this first
+    batches_per_step = accumulation_steps
+    actual_steps_per_epoch = steps_per_epoch // batches_per_step
+    total_steps = actual_steps_per_epoch * shared_config['EPOCHS']
     
     # Calculate warmup and scheduling parameters
-    warmup_steps = min(1000, total_steps // 10)  # 10% of training or 1000 steps, whichever is smaller
+    warmup_steps = min(1000, total_steps // 10)
     
     config = {
         # Model architecture
@@ -455,14 +460,14 @@ def create_optimized_reservoir_config(shared_config, train_loader):
         'SAVE_PATH': shared_config['RESERVOIR_SAVE_PATH'],
         
         # Calculated training parameters
-        'steps_per_epoch': steps_per_epoch,
+        'steps_per_epoch': actual_steps_per_epoch,
         'total_steps': total_steps,
         'warmup_steps': warmup_steps,
+        'accumulation_steps': accumulation_steps,  # Gradient accumulation
         
         # Optimized learning parameters
         'LR': 3e-4,           # Higher initial learning rate
         'weight_decay': 0.01,  # L2 regularization
-        'accumulation_steps': 4,  # Gradient accumulation
         
         # Generation parameters
         'temperature': 0.8,
@@ -522,7 +527,9 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
     val_perplexities = []
     learning_rates = []
     steps = []
+    
     total_batches = 0
+    optimizer_steps = 0
     
     print("Starting Optimized Reservoir Model training...")
     print(f"Training for {config['EPOCHS']} epochs, {config['total_steps']} total steps")
@@ -549,6 +556,8 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
             scaler.scale(loss).backward()
             
             if total_batches % accumulation_steps == 0:
+                optimizer_steps += 1
+                
                 # Gradient clipping
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -566,17 +575,17 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
             pbar.set_postfix({
                 'loss': f"{loss.item() * accumulation_steps:.4f}",
                 'lr': f"{current_lr:.2e}",
-                'step': f"{total_batches}/{config['total_steps']}"
+                'opt_step': f"{optimizer_steps}/{config['total_steps']}"
             })
             
             # Evaluation
-            if total_batches % config['EVAL_INTERVAL'] == 0:
+            if optimizer_steps > 0 and optimizer_steps % (config['EVAL_INTERVAL'] // accumulation_steps) == 0:
                 val_loss = eval_reservoir_model(model, val_loader, config)
                 perplexity = np.exp(val_loss)
                 val_perplexities.append(perplexity)
-                steps.append(total_batches)
+                steps.append(optimizer_steps)  # FIXED: Log optimizer steps instead of batch steps
                 
-                print(f"\nStep {total_batches}: Val Loss: {val_loss:.4f}, Perplexity: {perplexity:.4f}")
+                print(f"\nOptimizer Step {optimizer_steps}: Val Loss: {val_loss:.4f}, Perplexity: {perplexity:.4f}")
                 
                 # Generate sample
                 generated_text = generate_from_reservoir(
@@ -585,15 +594,16 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
                 print("Generated:", generated_text[:150] + "...")
             
             # Stop if we've reached the total steps
-            if total_batches >= config['total_steps']:
+            if optimizer_steps >= config['total_steps']:
+                print(f"\nReached target optimizer steps ({config['total_steps']}). Stopping training.")
                 break
         
         # Break from epoch loop if we've reached total steps
-        if total_batches >= config['total_steps']:
+        if optimizer_steps >= config['total_steps']:
             break
-    
-    print(f"\nTraining completed! Total steps: {total_batches}")
-    
+
+    print(f"\nTraining completed! Total batches: {total_batches}, Optimizer steps: {optimizer_steps}")
+
     return {
         'train_losses': train_losses,
         'val_perplexities': val_perplexities,
