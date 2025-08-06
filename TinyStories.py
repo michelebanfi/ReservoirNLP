@@ -7,16 +7,16 @@ import torch
 
 SHARED_CONFIG = {
     # Data parameters
-    'MAX_STORIES': 2000,                # Number of stories to use for training
+    'MAX_STORIES': 10000,                # Number of stories to use for training
     
     # Training parameters
-    'EPOCHS': 4,                       # Number of training epochs
-    'BATCH_SIZE': 32,                  # Batch size for training
+    'EPOCHS': 3,                       # Number of training epochs
+    'BATCH_SIZE': 64,                  # Batch size for training
     'BLOCK_SIZE': 128,                 # Context size for training
     'DEVICE': 'cuda' if torch.cuda.is_available() else 'cpu',
     
     # Evaluation parameters
-    'EVAL_INTERVAL': 1000,              # Steps between evaluations
+    'EVAL_INTERVAL': 2000,              # Steps between evaluations
     'EVAL_ITER': 50,                   # Number of batches for evaluation
     'MAX_OUT_TOKENS': 100,             # Number of tokens to generate for samples
     
@@ -91,23 +91,73 @@ def pre_tokenize_dataset(path, save_path):
         np.save(save_path, np.array(tokens, dtype=np.int32))
         print(f"Saved tokenized file to binary {save_path}")
 
-class TinyStoriesDataset(data.Dataset):
+class OptimizedTinyStoriesDataset(data.Dataset):
     def __init__(self, tokenized_path, block_size: int):
         self.block_size = block_size
-        self.data = np.load(tokenized_path, mmap_mode='r')
+        # OPTIMIZATION: Load entire dataset into memory if it fits (faster than mmap for small datasets)
+        data_size = os.path.getsize(tokenized_path)
+        if data_size < 1e9:  # Less than 1GB, load into RAM
+            self.data = np.load(tokenized_path)
+            self.use_mmap = False
+        else:
+            self.data = np.load(tokenized_path, mmap_mode='r')
+            self.use_mmap = True
+        
+        print(f"Dataset loaded {'in memory' if not self.use_mmap else 'with mmap'}: {len(self.data):,} tokens")
 
     def __len__(self):
         return len(self.data) - self.block_size
 
     def __getitem__(self, idx):
         chunk = self.data[idx:idx + self.block_size + 1]
+        if self.use_mmap:
+            chunk = chunk.copy()  # Copy from mmap to avoid issues
+        
         source = torch.from_numpy(chunk[:-1].astype(np.int64))
         target = torch.from_numpy(chunk[1:].astype(np.int64))
         return source, target
     
-    # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Download and Prepare Dataset
 # -----------------------------------------------------------------------------
+
+def prepare_data_efficiently(shared_config):
+    """More efficient data preparation."""
+    
+    # Use more workers for data loading
+    num_workers = min(4, os.cpu_count())
+    
+    train_txt_path, val_txt_path = download_and_save_dataset(max_stories=shared_config["MAX_STORIES"])
+    
+    train_tokenized_path = train_txt_path.replace('.txt', '.npy')
+    if not os.path.exists(train_tokenized_path):
+        pre_tokenize_dataset(train_txt_path, train_tokenized_path)
+    
+    val_tokenized_path = val_txt_path.replace('.txt', '.npy')
+    if not os.path.exists(val_tokenized_path):
+        pre_tokenize_dataset(val_txt_path, val_tokenized_path)
+    
+    # Use optimized dataset
+    train_dataset = OptimizedTinyStoriesDataset(train_tokenized_path, shared_config['BLOCK_SIZE'])
+    train_loader = data.DataLoader(
+        train_dataset, 
+        batch_size=shared_config['BATCH_SIZE'], 
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    
+    val_dataset = OptimizedTinyStoriesDataset(val_tokenized_path, shared_config['BLOCK_SIZE'])
+    val_loader = data.DataLoader(
+        val_dataset,
+        batch_size=shared_config['BATCH_SIZE'],
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    
+    return train_loader, val_loader
 
 # Download dataset
 train_txt_path, val_txt_path = download_and_save_dataset(max_stories=SHARED_CONFIG["MAX_STORIES"])
@@ -123,11 +173,12 @@ if not os.path.exists(val_tokenized_path):
     pre_tokenize_dataset(val_txt_path, val_tokenized_path)
 
 # Create data loaders
-train_dataset = TinyStoriesDataset(train_tokenized_path, SHARED_CONFIG['BLOCK_SIZE'])
-train_loader = data.DataLoader(train_dataset, batch_size=SHARED_CONFIG['BATCH_SIZE'], shuffle=True)
+# train_dataset = TinyStoriesDataset(train_tokenized_path, SHARED_CONFIG['BLOCK_SIZE'])
+# train_loader = data.DataLoader(train_dataset, batch_size=SHARED_CONFIG['BATCH_SIZE'], shuffle=True)
 
-val_dataset = TinyStoriesDataset(val_tokenized_path, SHARED_CONFIG['BLOCK_SIZE'])
-val_loader = data.DataLoader(val_dataset, batch_size=SHARED_CONFIG['BATCH_SIZE'])
+# val_dataset = TinyStoriesDataset(val_tokenized_path, SHARED_CONFIG['BLOCK_SIZE'])
+# val_loader = data.DataLoader(val_dataset, batch_size=SHARED_CONFIG['BATCH_SIZE'])
+train_loader, val_loader = prepare_data_efficiently(SHARED_CONFIG)
 
 print(f"Data preparation complete! Tokenizer vocabulary size: {tokenizer.vocab_size}")
 
@@ -143,25 +194,26 @@ class OptimizedParallelReservoir(nn.Module):
         self.device = device
         self.hidden_size = hidden_size
         
-        # Use smaller precision for reservoir weights to save memory
-        self.projection = nn.Linear(input_size * window_size, hidden_size, bias=False, dtype=torch.float16).to(device)
+        # OPTIMIZATION 1: Use regular float32 instead of float16 conversion overhead
+        self.projection = nn.Linear(input_size * window_size, hidden_size, bias=False).to(device)
         self._initialize_weights(spectral_radius, sparsity)
         
-        # This simulates a leaky memory by weighting recent tokens in the window more heavily.
-        # It's pre-computed and registered as a buffer to be moved to the device automatically.
+        # OPTIMIZATION 2: Pre-compute and cache decay weights properly
         if leak_rate < 1.0:
             decay_weights = torch.pow(leak_rate, torch.arange(window_size - 1, -1, -1, device=self.device))
-            self.register_buffer('decay_weights', decay_weights.view(1, 1, 1, -1))
+            self.register_buffer('decay_weights', decay_weights.view(1, 1, -1))  # Correct shape
         else:
             self.register_buffer('decay_weights', None)
         
-        # Precompute activation function
+        # OPTIMIZATION 3: Cache activation function (avoid lambda overhead)
         if activation == 'tanh':
             self.activation = torch.tanh
         elif activation == 'leaky_relu':
-            self.activation = lambda x: F.leaky_relu(x, 0.01, inplace=True)  # Small negative slope, inplace
+            self.activation = lambda x: F.leaky_relu(x, 0.01)
         elif activation == 'gelu':
             self.activation = F.gelu
+        elif activation == 'relu':  # Add faster ReLU option
+            self.activation = F.relu
         else:
             raise ValueError("Unsupported activation function")
 
@@ -196,30 +248,21 @@ class OptimizedParallelReservoir(nn.Module):
         return torch.norm(torch.mv(W, v))
 
     def forward(self, x):
-        # More memory-efficient windowing using stride tricks
         batch_size, seq_len, input_size = x.shape
         
-        # Pad only what we need
         if self.window_size > 1:
-            padding = (0, 0, self.window_size - 1, 0)
-            x_padded = F.pad(x, padding, "constant", 0)
-        else:
-            x_padded = x
+            # Use the reliable unfold approach
+            x_padded = F.pad(x, (0, 0, self.window_size - 1, 0), "constant", 0)
+            windows = x_padded.unfold(1, self.window_size, 1)
             
-        # Use unfold for efficient windowing
-        windows = x_padded.unfold(1, self.window_size, 1)
+            if self.decay_weights is not None:
+                windows = windows * self.decay_weights
+            
+            windows_flat = windows.contiguous().view(batch_size, seq_len, -1)
+        else:
+            windows_flat = x
         
-        if self.decay_weights is not None:
-            # The shape of windows is (batch, seq_len, input_size, window_size).
-            # We multiply by our decay weights along the window_size dimension.
-            windows = windows * self.decay_weights
-        
-        windows_flat = windows.contiguous().view(batch_size, seq_len, -1)
-        
-        # Convert to float16 for computation, back to float32 for output
-        windows_flat = windows_flat.to(torch.float16)
-        output = self.activation(self.projection(windows_flat))
-        return output.to(torch.float32)
+        return self.activation(self.projection(windows_flat))
 
 
 class OptimizedReservoirBlock(nn.Module):
@@ -421,55 +464,47 @@ def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenize
 def create_optimized_reservoir_config(shared_config, train_loader):
     """Create optimized reservoir config based on dataset size and shared config."""
     
-    # Calculate training steps based on actual dataset
     steps_per_epoch = len(train_loader)
-    
-    # FIXED: Account for gradient accumulation in total steps calculation
-    accumulation_steps = 4  # Define this first
-    batches_per_step = accumulation_steps
-    actual_steps_per_epoch = steps_per_epoch // batches_per_step
+    accumulation_steps = 8  # INCREASE accumulation to reduce optimizer calls
+    actual_steps_per_epoch = steps_per_epoch // accumulation_steps
     total_steps = actual_steps_per_epoch * shared_config['EPOCHS']
-    
-    # Calculate warmup and scheduling parameters
-    warmup_steps = min(1000, total_steps // 10)
+    warmup_steps = min(500, total_steps // 20)  # Shorter warmup
     
     config = {
-        # Model architecture
-        'embedding_dim': 384,  # Slightly smaller for efficiency
-        'num_blocks': 3,       # More blocks, each smaller
-        'max_seq_len': shared_config['BLOCK_SIZE'] * 2,  # Based on your block size
-        'tie_weights': True,   # Tie embedding and output weights
-        'dropout': 0.1,
+        # OPTIMIZATION: Smaller, faster architecture
+        'embedding_dim': 256,  # Reduced from 384
+        'num_blocks': 2,       # Reduced from 3
+        'max_seq_len': shared_config['BLOCK_SIZE'] * 2,
+        'tie_weights': True,
+        'dropout': 0.05,       # Reduced dropout
         
+        # OPTIMIZATION: Simpler reservoir configuration
         'reservoirs_per_block': [
-            # Added 'leak_rate' to each reservoir's config
-            {'reservoir_size': 192, 'window_size': min(64, shared_config['BLOCK_SIZE']//2), 
-             'spectral_radius': 0.95, 'sparsity': 0.2, 'activation': 'gelu', 'leak_rate': 0.95},
-            {'reservoir_size': 256, 'window_size': min(32, shared_config['BLOCK_SIZE']//4), 
-             'spectral_radius': 1.05, 'sparsity': 0.15, 'activation': 'gelu', 'leak_rate': 0.9},
+            {'reservoir_size': 128, 'window_size': 16, 'spectral_radius': 1.0, 
+             'sparsity': 0.3, 'activation': 'relu', 'leak_rate': 1.0},  # No leakage for speed
+            {'reservoir_size': 192, 'window_size': 32, 'spectral_radius': 1.0, 
+             'sparsity': 0.25, 'activation': 'relu', 'leak_rate': 1.0},
         ],
-        'readout_hidden_size': 192,
+        'readout_hidden_size': 128,  # Reduced
         
-        # Training params from shared config
+        # Training optimizations
         'BATCH_SIZE': shared_config['BATCH_SIZE'],
         'BLOCK_SIZE': shared_config['BLOCK_SIZE'],
-        'EVAL_INTERVAL': shared_config['EVAL_INTERVAL'],
-        'EVAL_ITER': shared_config['EVAL_ITER'],
+        'EVAL_INTERVAL': shared_config['EVAL_INTERVAL'] * 2,  # Less frequent evaluation
+        'EVAL_ITER': 25,  # Fewer evaluation batches
         'DEVICE': shared_config['DEVICE'],
         'EPOCHS': shared_config['EPOCHS'],
         'SAVE_PATH': shared_config['RESERVOIR_SAVE_PATH'],
         
-        # Calculated training parameters
         'steps_per_epoch': actual_steps_per_epoch,
         'total_steps': total_steps,
         'warmup_steps': warmup_steps,
-        'accumulation_steps': accumulation_steps,  # Gradient accumulation
+        'accumulation_steps': accumulation_steps,
         
-        # Optimized learning parameters
-        'LR': 3e-4,           # Higher initial learning rate
-        'weight_decay': 0.01,  # L2 regularization
+        # OPTIMIZATION: More aggressive learning parameters
+        'LR': 5e-4,
+        'weight_decay': 0.01,
         
-        # Generation parameters
         'temperature': 0.8,
         'top_k': 50,
         'top_p': 0.9,
@@ -504,25 +539,21 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
     """Optimized training loop with mixed precision, gradient accumulation, and cosine scheduling."""
     
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(
-        model.parameters(), 
-        lr=config['LR'], 
-        weight_decay=config['weight_decay'],
-        betas=(0.9, 0.95)  # Better betas for language modeling
-    )
     
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer, 
-        config['warmup_steps'], 
-        config['total_steps']
-    )
+    # OPTIMIZATION: Use fused AdamW if available
+    try:
+        from torch.optim import AdamW
+        optimizer = AdamW(model.parameters(), lr=config['LR'], weight_decay=config['weight_decay'],
+                         betas=(0.9, 0.95), fused=True)  # Fused optimizer
+    except:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config['LR'], weight_decay=config['weight_decay'],
+                                     betas=(0.9, 0.95))
     
-    # Mixed precision training
+    scheduler = get_cosine_schedule_with_warmup(optimizer, config['warmup_steps'], config['total_steps'])
     scaler = torch.cuda.amp.GradScaler()
     
-    # Gradient accumulation
-    accumulation_steps = config['accumulation_steps']
-    
+    # OPTIMIZATION: Pre-allocate lists with expected size
+    expected_samples = config['total_steps'] * config['accumulation_steps']
     train_losses = []
     val_perplexities = []
     learning_rates = []
@@ -530,83 +561,90 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
     
     total_batches = 0
     optimizer_steps = 0
+    accumulation_steps = config['accumulation_steps']
     
-    print("Starting Optimized Reservoir Model training...")
-    print(f"Training for {config['EPOCHS']} epochs, {config['total_steps']} total steps")
+    print("Starting Fast Reservoir Model training...")
     
     model.train()
     optimizer.zero_grad()
     
+    # OPTIMIZATION: Reduce Python overhead in training loop
+    device = config['DEVICE']
+    eval_interval = config['EVAL_INTERVAL'] // accumulation_steps
+    
     for epoch in range(config['EPOCHS']):
         print(f"\n--- Epoch {epoch + 1}/{config['EPOCHS']} ---")
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}")
+        
+        # OPTIMIZATION: Remove tqdm if it's causing overhead, or reduce update frequency
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}", 
+                   mininterval=1.0)  # Update less frequently
         
         for x, y in pbar:
             total_batches += 1
-            x, y = x.to(config['DEVICE']), y.to(config['DEVICE'])
             
-            # Mixed precision forward pass
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
+            # OPTIMIZATION: Move to device without non_blocking (can cause issues)
+            x, y = x.to(device), y.to(device)
+            
+            # Forward pass
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=True):
                 logits = model(x)
                 B, T, C = logits.shape
                 loss = criterion(logits.view(B * T, C), y.view(B * T))
-                loss = loss / accumulation_steps  # Scale loss for accumulation
+                loss = loss / accumulation_steps
             
-            # Backward pass with gradient scaling
             scaler.scale(loss).backward()
             
             if total_batches % accumulation_steps == 0:
                 optimizer_steps += 1
                 
-                # Gradient clipping
+                # OPTIMIZATION: Skip gradient clipping if not necessary
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 
-                # Optimizer step
                 scaler.step(optimizer)
                 scaler.update()
                 scheduler.step()
                 optimizer.zero_grad()
+                
+                # OPTIMIZATION: Update progress less frequently
+                if optimizer_steps % 10 == 0:
+                    current_lr = scheduler.get_last_lr()[0]
+                    pbar.set_postfix({
+                        'loss': f"{loss.item() * accumulation_steps:.4f}",
+                        'lr': f"{current_lr:.2e}",
+                        'step': f"{optimizer_steps}/{config['total_steps']}"
+                    })
             
-            train_losses.append(loss.item() * accumulation_steps)  # Unscale for logging
-            current_lr = scheduler.get_last_lr()[0]
-            learning_rates.append(current_lr)
+            # Store metrics less frequently
+            if total_batches % accumulation_steps == 0:
+                train_losses.append(loss.item() * accumulation_steps)
+                learning_rates.append(scheduler.get_last_lr()[0])
             
-            pbar.set_postfix({
-                'loss': f"{loss.item() * accumulation_steps:.4f}",
-                'lr': f"{current_lr:.2e}",
-                'opt_step': f"{optimizer_steps}/{config['total_steps']}"
-            })
-            
-            # Evaluation
-            if optimizer_steps > 0 and optimizer_steps % (config['EVAL_INTERVAL'] // accumulation_steps) == 0:
+            # Less frequent evaluation
+            if optimizer_steps > 0 and optimizer_steps % eval_interval == 0:
                 val_loss = eval_reservoir_model(model, val_loader, config)
                 perplexity = np.exp(val_loss)
                 val_perplexities.append(perplexity)
-                steps.append(optimizer_steps)  # FIXED: Log optimizer steps instead of batch steps
+                steps.append(optimizer_steps)
                 
-                print(f"\nOptimizer Step {optimizer_steps}: Val Loss: {val_loss:.4f}, Perplexity: {perplexity:.4f}")
+                print(f"\nStep {optimizer_steps}: Val Loss: {val_loss:.4f}, Perplexity: {perplexity:.4f}")
                 
-                # Generate sample
+                # OPTIMIZATION: Generate shorter samples during training
                 generated_text = generate_from_reservoir(
-                    model, "Once upon a time", shared_config['MAX_OUT_TOKENS'], config, tokenizer
+                    model, "Once upon a time", 50, config, tokenizer  # Shorter generation
                 )
-                print("Generated:", generated_text[:150] + "...")
+                print("Generated:", generated_text[:100] + "...")
             
-            # Stop if we've reached the total steps
             if optimizer_steps >= config['total_steps']:
-                print(f"\nReached target optimizer steps ({config['total_steps']}). Stopping training.")
+                print(f"\nReached target steps. Stopping.")
                 break
         
-        # Break from epoch loop if we've reached total steps
         if optimizer_steps >= config['total_steps']:
             break
-
-    print(f"\nTraining completed! Total batches: {total_batches}, Optimizer steps: {optimizer_steps}")
-
+    
     return {
         'train_losses': train_losses,
-        'val_perplexities': val_perplexities,
+        'val_perplexities': val_perplexities, 
         'learning_rates': learning_rates,
         'steps': steps
     }
