@@ -183,86 +183,272 @@ train_loader, val_loader = prepare_data_efficiently(SHARED_CONFIG)
 print(f"Data preparation complete! Tokenizer vocabulary size: {tokenizer.vocab_size}")
 
 
-class OptimizedParallelReservoir(nn.Module):
-    """
-    Memory and computation optimized reservoir with gradient checkpointing support.
-    """
-    def __init__(self, input_size, hidden_size, window_size, spectral_radius=1.2,
-                 sparsity=0.1, activation='tanh', device='cuda', leak_rate=0.95):
+# REPLACE current OptimizedParallelReservoir with:
+class TrueReservoir(nn.Module):
+    def __init__(self, input_size, hidden_size, spectral_radius=1.2, 
+                 sparsity=0.1, leak_rate=0.95, device='cuda'):
         super().__init__()
-        self.window_size = window_size
-        self.device = device
         self.hidden_size = hidden_size
+        self.leak_rate = leak_rate
+        self.device = device
         
-        # OPTIMIZATION 1: Use regular float32 instead of float16 conversion overhead
-        self.projection = nn.Linear(input_size * window_size, hidden_size, bias=False).to(device)
-        self._initialize_weights(spectral_radius, sparsity)
+        # Fixed reservoir weights (non-trainable)
+        self.W_in = nn.Linear(input_size, hidden_size, bias=False)
+        self.W_res = nn.Linear(hidden_size, hidden_size, bias=False)
         
-        # OPTIMIZATION 2: Pre-compute and cache decay weights properly
-        if leak_rate < 1.0:
-            decay_weights = torch.pow(leak_rate, torch.arange(window_size - 1, -1, -1, device=self.device))
-            self.register_buffer('decay_weights', decay_weights.view(1, 1, -1))  # Correct shape
-        else:
-            self.register_buffer('decay_weights', None)
-        
-        # OPTIMIZATION 3: Cache activation function (avoid lambda overhead)
-        if activation == 'tanh':
-            self.activation = torch.tanh
-        elif activation == 'leaky_relu':
-            self.activation = lambda x: F.leaky_relu(x, 0.01)
-        elif activation == 'gelu':
-            self.activation = F.gelu
-        elif activation == 'relu':  # Add faster ReLU option
-            self.activation = F.relu
-        else:
-            raise ValueError("Unsupported activation function")
-
-    def _initialize_weights(self, spectral_radius, sparsity):
         # Freeze reservoir weights
-        for param in self.projection.parameters():
+        for param in self.W_in.parameters():
             param.requires_grad = False
-
+        for param in self.W_res.parameters():
+            param.requires_grad = False
+            
+        self._initialize_weights(spectral_radius, sparsity)
+        self.activation = torch.tanh
+        self.register_buffer('initial_state', torch.zeros(1, hidden_size))
+    
+    def _initialize_weights(self, spectral_radius, sparsity):
+        import math
+        # Input weights - random uniform
+        nn.init.kaiming_uniform_(self.W_in.weight, a=math.sqrt(5))
+        
+        # Reservoir weights
         with torch.no_grad():
-            W = self.projection.weight.data
+            W = self.W_res.weight.data
+            mask = (torch.rand(W.shape, device=self.device) > sparsity).float()
+            W.normal_(0, 1)
+            W *= mask
             
-            # More efficient spectral radius normalization
-            if W.shape[0] == W.shape[1]:
-                # Use power iteration for large matrices (more efficient than full eigendecomposition)
-                if W.shape[0] > 512:
-                    current_radius = self._power_iteration_spectral_radius(W)
-                else:
-                    eigenvalues = torch.linalg.eigvals(W)
-                    current_radius = torch.max(torch.abs(eigenvalues))
-                W *= spectral_radius / current_radius
+            # Scale to desired spectral radius
+            eigenvalues = torch.linalg.eigvals(W)
+            current_radius = torch.max(torch.abs(eigenvalues))
+            W *= spectral_radius / (current_radius + 1e-8)
+    
+    def forward(self, x, initial_state=None):
+        batch_size, seq_len, _ = x.shape
+        states = torch.zeros(batch_size, seq_len, self.hidden_size, device=self.device)
+        prev_state = initial_state if initial_state is not None else self.initial_state.expand(batch_size, self.hidden_size)
+        
+        for t in range(seq_len):
+            input_t = x[:, t, :]
+            input_part = self.W_in(input_t)
+            reservoir_part = self.W_res(prev_state)
+            new_state = self.activation(input_part + reservoir_part)
             
-            # Apply sparsity mask
-            mask = (torch.rand(W.shape, device=self.device) > sparsity)
-            W *= mask.to(W.dtype)
+            # Leaky integration
+            if self.leak_rate < 1.0:
+                new_state = self.leak_rate * new_state + (1.0 - self.leak_rate) * prev_state
+                
+            states[:, t, :] = new_state
+            prev_state = new_state
+            
+        return states
 
-    def _power_iteration_spectral_radius(self, W, num_iterations=10):
-        """Estimate spectral radius using power iteration (more efficient for large matrices)"""
-        v = torch.randn(W.shape[1], device=W.device, dtype=W.dtype)
-        for _ in range(num_iterations):
-            v = torch.mv(W, v)
-            v = v / torch.norm(v)
-        return torch.norm(torch.mv(W, v))
 
+class NVARReservoir(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.delay = config.get('nvar_delay', 5)
+        self.degree = config.get('nvar_degree', 2)
+        self.input_size = config['embedding_dim']
+        
+        # Calculate feature dimension after expansion
+        linear_terms = self.delay * self.input_size
+        quadratic_terms = (linear_terms * (linear_terms + 1)) // 2
+        self.feature_dim = 1 + linear_terms + quadratic_terms  # constant + linear + quadratic
+        
+        # Trainable readout (only this part is trained)
+        self.readout = nn.Sequential(
+            nn.Linear(self.feature_dim, config['embedding_dim']),
+            nn.GELU(),
+            nn.Linear(config['embedding_dim'], config['embedding_dim'])
+        )
+        
+        # Register buffer for delayed indices
+        self.register_buffer('delay_indices', torch.arange(self.delay-1, -1, -1))
+    
+    def polynomial_expansion(self, x):
+        """Creates polynomial features from delayed embeddings"""
+        batch_size, seq_len, embed_dim = x.shape
+        
+        # Create delayed embeddings
+        x_padded = F.pad(x, (0, 0, self.delay-1, 0))
+        delayed = x_padded.unfold(1, self.delay, 1)  # [B, T, delay, embed_dim]
+        
+        # Reshape to [B*T, delay*embed_dim]
+        features = delayed.reshape(-1, self.delay * embed_dim)
+        
+        # Create polynomial features (constant + linear + quadratic)
+        constant = torch.ones(features.size(0), 1, device=features.device)
+        linear = features
+        
+        # Quadratic terms (only upper triangle to avoid duplicates)
+        quadratic_list = []
+        for i in range(features.size(1)):
+            for j in range(i, features.size(1)):
+                quadratic_list.append(features[:, i] * features[:, j])
+        quadratic = torch.stack(quadratic_list, dim=1)
+        
+        # Combine all features
+        all_features = torch.cat([constant, linear, quadratic], dim=1)
+        return all_features.reshape(batch_size, seq_len, -1)
+    
     def forward(self, x):
-        batch_size, seq_len, input_size = x.shape
+        # Create polynomial features
+        features = self.polynomial_expansion(x)
+        # Apply readout
+        return self.readout(features)
+
+
+class HybridReservoirBlock(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        # True reservoir component
+        self.reservoir = TrueReservoir(
+            input_size=config['embedding_dim'],
+            hidden_size=config['reservoir_size'],
+            spectral_radius=config['spectral_radius'],
+            sparsity=config.get('sparsity', 0.1),
+            leak_rate=config.get('leak_rate', 0.95),
+            device=config['DEVICE']
+        )
         
-        if self.window_size > 1:
-            # Use the reliable unfold approach
-            x_padded = F.pad(x, (0, 0, self.window_size - 1, 0), "constant", 0)
-            windows = x_padded.unfold(1, self.window_size, 1)
-            
-            if self.decay_weights is not None:
-                windows = windows * self.decay_weights
-            
-            windows_flat = windows.contiguous().view(batch_size, seq_len, -1)
-        else:
-            windows_flat = x
+        # SSM-inspired selective mechanism
+        self.delta_proj = nn.Sequential(
+            nn.Linear(config['embedding_dim'], 1),
+            nn.Softplus()
+        )
         
-        return self.activation(self.projection(windows_flat))
+        # State transition parameters (frozen like reservoir)
+        self.A = nn.Parameter(-torch.ones(config['reservoir_size']) * 10, requires_grad=False)
+        self.B = nn.Linear(config['embedding_dim'], config['reservoir_size'], bias=False)
+        for p in self.B.parameters():
+            p.requires_grad = False
+            
+        # Readout layer
+        self.readout = nn.Sequential(
+            nn.LayerNorm(config['reservoir_size']),
+            nn.Linear(config['reservoir_size'], config['embedding_dim']),
+            nn.GELU()
+        )
+        
+        # Hybrid gating mechanism
+        self.gate = nn.Sequential(
+            nn.Linear(config['embedding_dim'], config['embedding_dim']),
+            nn.Sigmoid()
+        )
+        
+        # Layer norm for stability
+        self.norm = nn.LayerNorm(config['embedding_dim'])
+
+    def forward(self, x, initial_state=None):
+        x_norm = self.norm(x)
+        
+        # Reservoir path
+        reservoir_states = self.reservoir(x_norm, initial_state)
+        reservoir_out = self.readout(reservoir_states)
+        
+        # SSM path with selective updates
+        B = self.B(x_norm)
+        delta = self.delta_proj(x_norm).squeeze(-1)  # [B, L]
+        
+        # Discretize A
+        A_bar = torch.exp(self.A * delta.unsqueeze(-1))  # [B, L, state_size]
+        B_bar = B * (1 - A_bar) / (self.A + 1e-8)  # [B, L, state_size]
+        
+        # State update
+        h0 = initial_state if initial_state is not None else torch.zeros_like(B[:, 0, :])
+        ssm_states = [h0]
+        for i in range(x_norm.size(1)):
+            h = A_bar[:, i, :] * ssm_states[-1] + B_bar[:, i, :]
+            ssm_states.append(h)
+        ssm_states = torch.stack(ssm_states[1:], dim=1)
+        
+        # Combine paths
+        gate = self.gate(x)
+        return reservoir_out * gate + ssm_states * (1 - gate)
+
+
+class EnhancedDeepReservoirModel(nn.Module):
+    def __init__(self, vocab_size, config):
+        super().__init__()
+        self.config = config
+        
+        # Embedding layer
+        self.embedding = nn.Embedding(vocab_size, config['embedding_dim'])
+        
+        # Positional encoding
+        self.pos_encoding = nn.Parameter(
+            torch.randn(config['max_seq_len'], config['embedding_dim']) * 0.02
+        )
+        
+        # Reservoir blocks - use hybrid implementation
+        self.blocks = nn.ModuleList([
+            HybridReservoirBlock({
+                **config,
+                'reservoir_size': config['reservoir_size'] // (i + 1)
+            }) for i in range(config['num_blocks'])
+        ])
+        
+        # Output head
+        self.ln_f = nn.LayerNorm(config['embedding_dim'])
+        self.lm_head = nn.Linear(config['embedding_dim'], vocab_size, bias=False)
+        
+        # Tie weights
+        self.lm_head.weight = self.embedding.weight
+        
+        # Initialize weights
+        self.apply(self._init_weights)
+        
+        # Reservoir warmup parameters
+        self.warmup_steps = config.get('reservoir_warmup', 5)
+        
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            
+    def forward(self, idx, initial_states=None):
+        batch_size, seq_len = idx.shape
+        
+        # Token embeddings
+        tok_emb = self.embedding(idx)
+        
+        # Positional embeddings
+        pos_emb = self.pos_encoding[:seq_len, :].unsqueeze(0).expand(batch_size, -1, -1)
+        
+        # Combined embeddings
+        x = tok_emb + pos_emb
+        
+        # Process through reservoir blocks with state management
+        current_states = initial_states
+        for i, block in enumerate(self.blocks):
+            # Apply warmup for the first few tokens
+            if self.training and seq_len > self.warmup_steps:
+                # Process warmup tokens first
+                warmup_x = x[:, :self.warmup_steps]
+                warmup_states = block.reservoir.initial_state.expand(batch_size, -1)
+                for _ in range(self.warmup_steps):
+                    warmup_states = block(warmup_x[:, _:_+1], warmup_states)
+                
+                # Now process the main sequence with warmed-up state
+                x = block(x[:, self.warmup_steps:], warmup_states)
+            else:
+                x = block(x, current_states[i] if current_states else None)
+                if current_states is None:
+                    current_states = [torch.zeros(batch_size, block.reservoir.hidden_size, 
+                                                device=idx.device) for _ in self.blocks]
+                current_states[i] = x[:, -1, :]  # Store final state
+        
+        # Final layer norm
+        x = self.ln_f(x)
+        
+        # Language modeling head
+        logits = self.lm_head(x)
+        
+        return logits, current_states
 
 
 class OptimizedReservoirBlock(nn.Module):
@@ -391,72 +577,109 @@ class OptimizedDeepReservoirModel(nn.Module):
 
 @torch.no_grad()
 def eval_reservoir_model(model, data_loader, config):
-    """Evaluates the reservoir model with mixed precision."""
+    """Evaluates the reservoir model with state management."""
     model.eval()
     total_loss = 0
     criterion = nn.CrossEntropyLoss()
     num_batches = 0
     
-    with torch.autocast(device_type='cuda', dtype=torch.float16):
-        for x, y in data_loader:
-            if num_batches >= config['EVAL_ITER']:
-                break
-            x, y = x.to(config['DEVICE']), y.to(config['DEVICE'])
+    for x, y in data_loader:
+        if num_batches >= config['EVAL_ITER']:
+            break
+            
+        x, y = x.to(config['DEVICE']), y.to(config['DEVICE'])
+        
+        # Reset states for each batch
+        initial_states = None
+        if hasattr(model, 'blocks') and len(model.blocks) > 0 and hasattr(model.blocks[0], 'reservoir'):
+            # EnhancedDeepReservoirModel
+            logits, _ = model(x, initial_states)
+        else:
+            # OptimizedDeepReservoirModel (original)
             logits = model(x)
-            B, T, C = logits.shape
-            loss = criterion(logits.view(B * T, C), y.view(B * T))
-            total_loss += loss.item()
-            num_batches += 1
-    
+        
+        B, T, C = logits.shape
+        loss = criterion(logits.view(B * T, C), y.view(B * T))
+        total_loss += loss.item()
+        num_batches += 1
+        
     model.train()
     return total_loss / num_batches if num_batches > 0 else float('inf')
 
 
 @torch.no_grad()
 def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenizer):
-    """Generates text using temperature, top-k, and top-p (nucleus) sampling."""
+    """Generates text with proper reservoir state management."""
     model.eval()
     start_indices = tokenizer.encode(context_str)
     context = torch.tensor(start_indices, dtype=torch.long, device=config['DEVICE']).unsqueeze(0)
     
-    temperature = config.get('temperature', 0.8)
-    top_k = config.get('top_k', 50)
-    top_p = config.get('top_p', 0.9)
-
-    for _ in range(max_new_tokens):
-        current_context = context if context.size(1) <= config['BLOCK_SIZE'] else context[:, -config['BLOCK_SIZE']:]
+    # Process initial context to warm up reservoir states
+    initial_context = context if context.size(1) <= config['BLOCK_SIZE'] else context[:, -config['BLOCK_SIZE']:]
+    
+    # Check if this is the enhanced model with state management
+    if hasattr(model, 'blocks') and len(model.blocks) > 0 and hasattr(model.blocks[0], 'reservoir'):
+        # EnhancedDeepReservoirModel
+        _, states = model(initial_context)
         
-        with torch.autocast(device_type='cuda', dtype=torch.float16):
-            logits = model(current_context)
+        # Generate new tokens
+        for _ in range(max_new_tokens):
+            current_token = context[:, -1:]
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                logits, states = model(current_token, states)
+            
+            logits = logits[:, -1, :] / config.get('temperature', 0.8)
+            
+            # Apply top-k and top-p sampling
+            if config.get('top_p', 0.9) > 0.0:
+                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                sorted_indices_to_remove = cumulative_probs > config['top_p']
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                indices_to_remove = sorted_indices[sorted_indices_to_remove].unsqueeze(0)
+                logits.scatter_(1, indices_to_remove, float('-inf'))
+                
+            if config.get('top_k', 50) > 0:
+                top_k_logits, top_k_indices = torch.topk(logits, config['top_k'])
+                filtered_logits = torch.full_like(logits, float('-inf'))
+                filtered_logits.scatter_(1, top_k_indices, top_k_logits)
+                logits = filtered_logits
+                
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            context = torch.cat((context, idx_next), dim=1)
+    else:
+        # Original OptimizedDeepReservoirModel
+        for _ in range(max_new_tokens):
+            current_context = context if context.size(1) <= config['BLOCK_SIZE'] else context[:, -config['BLOCK_SIZE']:]
+            
+            with torch.autocast(device_type='cuda', dtype=torch.float16):
+                logits = model(current_context)
+            
+            logits = logits[:, -1, :] / config.get('temperature', 0.8)
+            
+            if config.get('top_p', 0.9) > 0.0:
+                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+                sorted_indices_to_remove = cumulative_probs > config['top_p']
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                
+                indices_to_remove = sorted_indices[sorted_indices_to_remove].unsqueeze(0)
+                logits.scatter_(1, indices_to_remove, float('-inf'))
+
+            if config.get('top_k', 50) > 0:
+                top_k_logits, top_k_indices = torch.topk(logits, config['top_k'])
+                filtered_logits = torch.full_like(logits, float('-inf'))
+                filtered_logits.scatter_(1, top_k_indices, top_k_logits)
+                logits = filtered_logits
+            
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            context = torch.cat((context, idx_next), dim=1)
         
-        logits = logits[:, -1, :] / temperature
-        
-        if top_p > 0.0:
-            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
-            sorted_indices_to_remove = cumulative_probs > top_p
-            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-            sorted_indices_to_remove[..., 0] = 0
-
-            # --- THIS IS THE LINE TO FIX ---
-            # We get a 1D tensor from boolean indexing, so we unsqueeze it to make it 2D.
-            indices_to_remove = sorted_indices[sorted_indices_to_remove].unsqueeze(0)
-            # --- END FIX ---
-
-            logits.scatter_(1, indices_to_remove, float('-inf'))
-
-        if top_k > 0:
-            top_k_logits, top_k_indices = torch.topk(logits, top_k)
-            filtered_logits = torch.full_like(logits, float('-inf'))
-            filtered_logits.scatter_(1, top_k_indices, top_k_logits)
-            logits = filtered_logits
-        
-        probs = F.softmax(logits, dim=-1)
-        idx_next = torch.multinomial(probs, num_samples=1)
-        
-        context = torch.cat((context, idx_next), dim=1)
-
     model.train()
     return tokenizer.decode(context.squeeze().tolist())
 
@@ -518,6 +741,135 @@ def create_optimized_reservoir_config(shared_config, train_loader):
     print(f"  Effective batch size: {config['BATCH_SIZE'] * config['accumulation_steps']}")
     
     return config
+
+
+def create_enhanced_reservoir_config(shared_config, train_loader):
+    """Create enhanced reservoir config with NVAR and SSM elements."""
+    steps_per_epoch = len(train_loader)
+    accumulation_steps = 8
+    actual_steps_per_epoch = steps_per_epoch // accumulation_steps
+    total_steps = actual_steps_per_epoch * shared_config['EPOCHS']
+    warmup_steps = min(500, total_steps // 20)
+    
+    config = {
+        # Architecture parameters
+        'embedding_dim': 256,
+        'num_blocks': 2,
+        'max_seq_len': shared_config['BLOCK_SIZE'] * 2,
+        'tie_weights': True,
+        
+        # Reservoir parameters
+        'reservoir_size': 384,  # Larger reservoir for better capacity
+        'spectral_radius': 1.0,
+        'sparsity': 0.2,
+        'leak_rate': 0.95,
+        'reservoir_warmup': 5,  # Warmup steps for reservoir stability
+        
+        # NVAR parameters (if using pure NVAR path)
+        'nvar_delay': 5,
+        'nvar_degree': 2,
+        
+        # Training optimizations
+        'BATCH_SIZE': shared_config['BATCH_SIZE'],
+        'BLOCK_SIZE': shared_config['BLOCK_SIZE'],
+        'EVAL_INTERVAL': shared_config['EVAL_INTERVAL'] * 2,
+        'EVAL_ITER': 25,
+        'DEVICE': shared_config['DEVICE'],
+        'EPOCHS': shared_config['EPOCHS'],
+        'SAVE_PATH': shared_config['RESERVOIR_SAVE_PATH'],
+        'steps_per_epoch': actual_steps_per_epoch,
+        'total_steps': total_steps,
+        'warmup_steps': warmup_steps,
+        'accumulation_steps': accumulation_steps,
+        
+        # Learning parameters
+        'LR': 5e-4,
+        'weight_decay': 0.01,
+        'temperature': 0.8,
+        'top_k': 50,
+        'top_p': 0.9,
+    }
+    
+    return config
+
+
+@torch.no_grad()
+def evaluate_reservoir_quality(model, data_loader, config, num_samples=10):
+    """Evaluates key reservoir properties: memory capacity and state separation."""
+    model.eval()
+    memory_capacities = []
+    state_separation = []
+    
+    # Sample a few sequences for evaluation
+    samples = []
+    for x, _ in data_loader:
+        if len(samples) >= num_samples:
+            break
+        samples.append(x.to(config['DEVICE']))
+    
+    # Check if this is the enhanced model
+    if not (hasattr(model, 'blocks') and len(model.blocks) > 0 and hasattr(model.blocks[0], 'reservoir')):
+        model.train()
+        return {'memory_capacity': 0, 'state_separation': 0}
+    
+    # Evaluate memory capacity
+    for x in samples:
+        _, states = model(x)
+        
+        # Memory capacity test - predict past inputs from current state
+        for block_idx, block_states in enumerate(states):
+            mc = 0
+            for k in range(1, min(10, x.size(1))):
+                # Predict x(t-k) from state at time t
+                pred = block_states[:, k:]  # States at time t
+                target = x[:, :-k]  # Inputs at time t-k
+                
+                # Simple linear readout for memory capacity test
+                with torch.no_grad():
+                    # Solve least squares problem: W * states = inputs
+                    pred_flat = pred.reshape(-1, pred.size(-1))
+                    target_flat = target.reshape(-1, target.size(-1))
+                    if pred_flat.size(0) > 0 and target_flat.size(0) > 0:
+                        try:
+                            W = torch.linalg.lstsq(pred_flat, target_flat, driver='gels')[0]
+                            pred_target = pred_flat @ W
+                            
+                            # Calculate memory capacity
+                            mc_k = 1 - (torch.norm(pred_target - target_flat) ** 2) / (torch.norm(target_flat) ** 2 + 1e-8)
+                            mc += mc_k.item()
+                        except:
+                            pass
+            
+            memory_capacities.append(mc / min(10, x.size(1)))
+    
+    # Evaluate state separation
+    for i in range(len(samples)):
+        for j in range(i+1, len(samples)):
+            x1 = samples[i]
+            x2 = samples[j]
+            
+            _, states1 = model(x1)
+            _, states2 = model(x2)
+            
+            # Compare states for different inputs
+            for block_states1, block_states2 in zip(states1, states2):
+                # Distance between states for different inputs
+                dist_diff = torch.norm(block_states1 - block_states2, dim=-1).mean().item()
+                
+                # Distance between states for same input (should be small)
+                x1_copy = x1.clone()
+                _, states1_copy = model(x1_copy)
+                dist_same = torch.norm(block_states1 - states1_copy[0], dim=-1).mean().item()
+                
+                # State separation ratio
+                separation = dist_diff / (dist_same + 1e-8)
+                state_separation.append(separation)
+    
+    model.train()
+    return {
+        'memory_capacity': np.mean(memory_capacities) if memory_capacities else 0,
+        'state_separation': np.mean(state_separation) if state_separation else 0
+    }
 
 
 def get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps):
@@ -658,50 +1010,75 @@ optimized_model = OptimizedDeepReservoirModel(
 
 print(f"Optimized model: {sum(p.numel() for p in optimized_model.parameters() if p.requires_grad):,} trainable parameters")
 
+# Create enhanced configuration
+enhanced_config = create_enhanced_reservoir_config(SHARED_CONFIG, train_loader)
+
+# Initialize enhanced model
+enhanced_model = EnhancedDeepReservoirModel(
+    vocab_size=tokenizer.vocab_size,
+    config=enhanced_config
+).to(enhanced_config['DEVICE'])
+
+print(f"Enhanced model: {sum(p.numel() for p in enhanced_model.parameters() if p.requires_grad):,} trainable parameters")
+
 
 # -----------------------------------------------------------------------------
-# Train the Reservoir Model
+# Train the Enhanced Reservoir Model  
 # -----------------------------------------------------------------------------
 
-# Train the model
+# Train the enhanced model
 training_history = train_optimized_reservoir_model(
-    optimized_model, 
+    enhanced_model, 
     train_loader, 
     val_loader, 
-    optimized_reservoir_config,
+    enhanced_config,
     tokenizer,
     SHARED_CONFIG
 )
 
-# Plot results
-plt.figure(figsize=(15, 5))
+# Evaluate reservoir quality periodically
+if enhanced_config.get('EVAL_INTERVAL', 0) > 0:
+    reservoir_metrics = evaluate_reservoir_quality(enhanced_model, val_loader, enhanced_config)
+    print(f"Reservoir Quality - Memory Capacity: {reservoir_metrics['memory_capacity']:.4f}, "
+          f"State Separation: {reservoir_metrics['state_separation']:.4f}")
 
-plt.subplot(1, 3, 1)
+# Update visualization to include reservoir metrics
+plt.figure(figsize=(20, 5))
+plt.subplot(1, 4, 1)
 plt.plot(training_history['train_losses'])
 plt.title('Training Loss')
 plt.xlabel('Batch')
 plt.ylabel('Loss')
 plt.grid(True)
 
-plt.subplot(1, 3, 2)
+plt.subplot(1, 4, 2)
 plt.plot(training_history['steps'], training_history['val_perplexities'], marker='o')
 plt.title('Validation Perplexity')
 plt.xlabel('Steps')
 plt.ylabel('Perplexity')
 plt.grid(True)
 
-plt.subplot(1, 3, 3)
+plt.subplot(1, 4, 3)
 plt.plot(training_history['learning_rates'])
 plt.title('Learning Rate Schedule')
 plt.xlabel('Batch')
 plt.ylabel('Learning Rate')
 plt.grid(True)
 
+# Add reservoir quality metrics plot
+if 'reservoir_metrics' in locals():
+    plt.subplot(1, 4, 4)
+    plt.bar(['Memory Capacity', 'State Separation'], 
+            [reservoir_metrics['memory_capacity'], reservoir_metrics['state_separation']])
+    plt.title('Reservoir Quality Metrics')
+    plt.ylabel('Score')
+    plt.grid(True)
+
 plt.tight_layout()
 plt.show()
 
-# Save the model
-torch.save(optimized_model.state_dict(), optimized_reservoir_config['SAVE_PATH'])
+# Save the enhanced model
+torch.save(enhanced_model.state_dict(), enhanced_config['SAVE_PATH'])
 
 
 print("=" * 80)
@@ -711,15 +1088,15 @@ print("=" * 80)
 prompt = "Once upon a time, there was a little"
 print(f"Prompt: '{prompt}'\n")
 
-# Generate from Reservoir model
-reservoir_text = generate_from_reservoir(
-    optimized_model, 
+# Generate from Enhanced Reservoir model
+enhanced_text = generate_from_reservoir(
+    enhanced_model, 
     prompt, 
     SHARED_CONFIG['MAX_OUT_TOKENS'], 
-    optimized_reservoir_config,
+    enhanced_config,
     tokenizer
 )
-print("Reservoir Model Output:")
+print("Enhanced Reservoir Model Output:")
 print("-" * 50)
-print(reservoir_text)
+print(enhanced_text)
 print("\n")
