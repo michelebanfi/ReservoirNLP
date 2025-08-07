@@ -13,7 +13,7 @@ SHARED_CONFIG = {
     'EPOCHS': 3,                       # Number of training epochs
     'BATCH_SIZE': 64,                  # Batch size for training
     'BLOCK_SIZE': 128,                 # Context size for training
-    'DEVICE': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'USE_TPU': False,                  # Set to True to use TPU instead of GPU
     
     # Evaluation parameters
     'EVAL_INTERVAL': 2000,              # Steps between evaluations
@@ -25,7 +25,23 @@ SHARED_CONFIG = {
     'TRANSFORMER_SAVE_PATH': 'models/tiny_lm_trained.pt'
 }
 
-print(f"Using device: {SHARED_CONFIG['DEVICE']}")
+def get_device(use_tpu=False):
+    """Returns appropriate device based on configuration."""
+    if use_tpu:
+        try:
+            import torch_xla.core.xla_model as xm
+            import torch_xla.distributed.xla_multiprocessing as xmp
+            print("TPU detected and initialized")
+            return xm.xla_device()
+        except ImportError:
+            print("Warning: TPU requested but torch_xla not installed. Falling back to GPU.")
+            return 'cuda' if torch.cuda.is_available() else 'cpu'
+    else:
+        return 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# Update the SHARED_CONFIG with the proper device
+SHARED_CONFIG['DEVICE'] = get_device(SHARED_CONFIG['USE_TPU'])
+print(f"Using device: {SHARED_CONFIG['DEVICE']} (TPU={'Yes' if SHARED_CONFIG['USE_TPU'] else 'No'})")
 os.makedirs("models", exist_ok=True)
 
 # -----------------------------------------------------------------------------
@@ -40,6 +56,36 @@ from tqdm import tqdm
 from transformers import GPT2TokenizerFast
 from datasets import load_dataset
 import matplotlib.pyplot as plt
+from contextlib import nullcontext
+
+
+# -----------------------------------------------------------------------------
+# Unified Precision and Device Utilities
+# -----------------------------------------------------------------------------
+
+def get_autocast_context(device, use_tpu=False):
+    """Returns appropriate autocast context manager based on device type."""
+    if use_tpu:
+        # TPUs handle precision differently - no explicit autocast needed
+        return nullcontext()
+    else:
+        # GPU uses standard autocast
+        return torch.autocast(device_type='cuda', dtype=torch.float16)
+
+def get_grad_scaler(use_tpu=False):
+    """Returns appropriate gradient scaler based on device type."""
+    if use_tpu:
+        # TPUs don't use GradScaler - they handle scaling internally
+        class DummyScaler:
+            def scale(self, loss):
+                return loss
+            def step(self, optimizer):
+                return optimizer.step()
+            def update(self):
+                pass
+        return DummyScaler()
+    else:
+        return torch.cuda.amp.GradScaler()
 
 
 # -----------------------------------------------------------------------------
@@ -122,17 +168,18 @@ class OptimizedTinyStoriesDataset(data.Dataset):
 # -----------------------------------------------------------------------------
 
 def prepare_data_efficiently(shared_config):
-    """More efficient data preparation."""
-    
+    """More efficient data preparation with TPU support."""
     # Use more workers for data loading
     num_workers = min(4, os.cpu_count())
     
-    train_txt_path, val_txt_path = download_and_save_dataset(max_stories=shared_config["MAX_STORIES"])
+    # TPU-specific optimizations
+    persistent_workers = not shared_config['USE_TPU']
+    pin_memory = shared_config['DEVICE'] != 'cpu' and not shared_config['USE_TPU']
     
+    train_txt_path, val_txt_path = download_and_save_dataset(max_stories=shared_config["MAX_STORIES"])
     train_tokenized_path = train_txt_path.replace('.txt', '.npy')
     if not os.path.exists(train_tokenized_path):
         pre_tokenize_dataset(train_txt_path, train_tokenized_path)
-    
     val_tokenized_path = val_txt_path.replace('.txt', '.npy')
     if not os.path.exists(val_tokenized_path):
         pre_tokenize_dataset(val_txt_path, val_tokenized_path)
@@ -142,20 +189,32 @@ def prepare_data_efficiently(shared_config):
     train_loader = data.DataLoader(
         train_dataset, 
         batch_size=shared_config['BATCH_SIZE'], 
-        shuffle=True,
+        shuffle=not shared_config['USE_TPU'],  # TPUs prefer no shuffling in dataloader
         num_workers=num_workers,
-        pin_memory=True,
-        persistent_workers=True if num_workers > 0 else False
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        drop_last=shared_config['USE_TPU']  # TPUs work better with consistent batch sizes
     )
     
     val_dataset = OptimizedTinyStoriesDataset(val_tokenized_path, shared_config['BLOCK_SIZE'])
     val_loader = data.DataLoader(
         val_dataset,
         batch_size=shared_config['BATCH_SIZE'],
+        shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
-        persistent_workers=True if num_workers > 0 else False
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers
     )
+    
+    # TPU-specific data loader wrapping
+    if shared_config['USE_TPU']:
+        try:
+            import torch_xla.distributed.parallel_loader as pl
+            train_loader = pl.MpDeviceLoader(train_loader, shared_config['DEVICE'])
+            val_loader = pl.MpDeviceLoader(val_loader, shared_config['DEVICE'])
+            print("Data loaders wrapped for TPU compatibility")
+        except ImportError:
+            print("Warning: TPU requested but torch_xla not installed. Data loaders not wrapped.")
     
     return train_loader, val_loader
 
@@ -576,43 +635,62 @@ class OptimizedDeepReservoirModel(nn.Module):
 
 
 @torch.no_grad()
-def eval_reservoir_model(model, data_loader, config):
-    """Evaluates the reservoir model with state management."""
+def eval_reservoir_model(model, data_loader, config, shared_config):
+    """Evaluates the reservoir model with TPU/GPU compatibility."""
     model.eval()
     total_loss = 0
     criterion = nn.CrossEntropyLoss()
     num_batches = 0
     
-    for x, y in data_loader:
-        if num_batches >= config['EVAL_ITER']:
-            break
+    # Use appropriate context manager
+    with get_autocast_context(config['DEVICE'], shared_config['USE_TPU']):
+        for x, y in data_loader:
+            if num_batches >= config['EVAL_ITER']:
+                break
             
-        x, y = x.to(config['DEVICE']), y.to(config['DEVICE'])
-        
-        # Reset states for each batch
-        initial_states = None
-        if hasattr(model, 'blocks') and len(model.blocks) > 0 and hasattr(model.blocks[0], 'reservoir'):
-            # EnhancedDeepReservoirModel
-            logits, _ = model(x, initial_states)
-        else:
-            # OptimizedDeepReservoirModel (original)
-            logits = model(x)
-        
-        B, T, C = logits.shape
-        loss = criterion(logits.view(B * T, C), y.view(B * T))
-        total_loss += loss.item()
-        num_batches += 1
-        
+            # Device transfer
+            if shared_config['USE_TPU']:
+                try:
+                    import torch_xla.core.xla_model as xm
+                    x = xm.send_cpu_data_to_device(x, config['DEVICE'])
+                    y = xm.send_cpu_data_to_device(y, config['DEVICE'])
+                except:
+                    x, y = x.to(config['DEVICE']), y.to(config['DEVICE'])
+            else:
+                x, y = x.to(config['DEVICE']), y.to(config['DEVICE'])
+            
+            # Reset states for each batch
+            initial_states = None
+            if hasattr(model, 'blocks') and len(model.blocks) > 0 and hasattr(model.blocks[0], 'reservoir'):
+                # EnhancedDeepReservoirModel
+                logits, _ = model(x, initial_states)
+            else:
+                # OptimizedDeepReservoirModel (original)
+                logits = model(x)
+            
+            B, T, C = logits.shape
+            loss = criterion(logits.view(B * T, C), y.view(B * T))
+            total_loss += loss.item()
+            num_batches += 1
+    
     model.train()
     return total_loss / num_batches if num_batches > 0 else float('inf')
 
 
 @torch.no_grad()
-def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenizer):
-    """Generates text with proper reservoir state management."""
+def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenizer, shared_config):
+    """Generates text with TPU/GPU compatibility."""
     model.eval()
     start_indices = tokenizer.encode(context_str)
-    context = torch.tensor(start_indices, dtype=torch.long, device=config['DEVICE']).unsqueeze(0)
+    context = torch.tensor(start_indices, dtype=torch.long, device=config['DEVICE'])
+    
+    # For TPUs, need to reshape to batch dimension
+    if len(context.shape) == 1:
+        context = context.unsqueeze(0)
+    
+    temperature = config.get('temperature', 0.8)
+    top_k = config.get('top_k', 50)
+    top_p = config.get('top_p', 0.9)
     
     # Process initial context to warm up reservoir states
     initial_context = context if context.size(1) <= config['BLOCK_SIZE'] else context[:, -config['BLOCK_SIZE']:]
@@ -625,23 +703,23 @@ def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenize
         # Generate new tokens
         for _ in range(max_new_tokens):
             current_token = context[:, -1:]
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
+            with get_autocast_context(config['DEVICE'], shared_config['USE_TPU']):
                 logits, states = model(current_token, states)
             
-            logits = logits[:, -1, :] / config.get('temperature', 0.8)
+            logits = logits[:, -1, :] / temperature
             
-            # Apply top-k and top-p sampling
-            if config.get('top_p', 0.9) > 0.0:
+            # Apply top-p and top-k sampling
+            if top_p > 0.0:
                 sorted_logits, sorted_indices = torch.sort(logits, descending=True)
                 cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                sorted_indices_to_remove = cumulative_probs > config['top_p']
+                sorted_indices_to_remove = cumulative_probs > top_p
                 sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                 sorted_indices_to_remove[..., 0] = 0
                 indices_to_remove = sorted_indices[sorted_indices_to_remove].unsqueeze(0)
                 logits.scatter_(1, indices_to_remove, float('-inf'))
                 
-            if config.get('top_k', 50) > 0:
-                top_k_logits, top_k_indices = torch.topk(logits, config['top_k'])
+            if top_k > 0:
+                top_k_logits, top_k_indices = torch.topk(logits, top_k)
                 filtered_logits = torch.full_like(logits, float('-inf'))
                 filtered_logits.scatter_(1, top_k_indices, top_k_logits)
                 logits = filtered_logits
@@ -654,24 +732,23 @@ def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenize
         for _ in range(max_new_tokens):
             current_context = context if context.size(1) <= config['BLOCK_SIZE'] else context[:, -config['BLOCK_SIZE']:]
             
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
+            with get_autocast_context(config['DEVICE'], shared_config['USE_TPU']):
                 logits = model(current_context)
             
-            logits = logits[:, -1, :] / config.get('temperature', 0.8)
+            logits = logits[:, -1, :] / temperature
             
-            if config.get('top_p', 0.9) > 0.0:
+            # Top-p and top-k sampling
+            if top_p > 0.0:
                 sorted_logits, sorted_indices = torch.sort(logits, descending=True)
                 cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
-                sorted_indices_to_remove = cumulative_probs > config['top_p']
+                sorted_indices_to_remove = cumulative_probs > top_p
                 sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                 sorted_indices_to_remove[..., 0] = 0
-                
                 indices_to_remove = sorted_indices[sorted_indices_to_remove].unsqueeze(0)
                 logits.scatter_(1, indices_to_remove, float('-inf'))
 
-            if config.get('top_k', 50) > 0:
-                top_k_logits, top_k_indices = torch.topk(logits, config['top_k'])
+            if top_k > 0:
+                top_k_logits, top_k_indices = torch.topk(logits, top_k)
                 filtered_logits = torch.full_like(logits, float('-inf'))
                 filtered_logits.scatter_(1, top_k_indices, top_k_logits)
                 logits = filtered_logits
@@ -679,61 +756,71 @@ def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenize
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
             context = torch.cat((context, idx_next), dim=1)
-        
+    
+    # TPU-specific step marking
+    if shared_config['USE_TPU']:
+        try:
+            import torch_xla.core.xla_model as xm
+            xm.mark_step()
+        except:
+            pass
+    
     model.train()
     return tokenizer.decode(context.squeeze().tolist())
 
 
 def create_optimized_reservoir_config(shared_config, train_loader):
-    """Create optimized reservoir config based on dataset size and shared config."""
-    
+    """Create optimized reservoir config with TPU support."""
     steps_per_epoch = len(train_loader)
-    accumulation_steps = 8  # INCREASE accumulation to reduce optimizer calls
+    accumulation_steps = 8
     actual_steps_per_epoch = steps_per_epoch // accumulation_steps
     total_steps = actual_steps_per_epoch * shared_config['EPOCHS']
-    warmup_steps = min(500, total_steps // 20)  # Shorter warmup
+    warmup_steps = min(500, total_steps // 20)
     
     config = {
-        # OPTIMIZATION: Smaller, faster architecture
-        'embedding_dim': 256,  # Reduced from 384
-        'num_blocks': 2,       # Reduced from 3
+        # Architecture parameters
+        'embedding_dim': 256,
+        'num_blocks': 2,
         'max_seq_len': shared_config['BLOCK_SIZE'] * 2,
         'tie_weights': True,
-        'dropout': 0.05,       # Reduced dropout
         
-        # OPTIMIZATION: Simpler reservoir configuration
+        # Reservoir parameters
         'reservoirs_per_block': [
             {'reservoir_size': 128, 'window_size': 16, 'spectral_radius': 1.0, 
-             'sparsity': 0.3, 'activation': 'relu', 'leak_rate': 1.0},  # No leakage for speed
+             'sparsity': 0.3, 'activation': 'relu', 'leak_rate': 1.0},
             {'reservoir_size': 192, 'window_size': 32, 'spectral_radius': 1.0, 
              'sparsity': 0.25, 'activation': 'relu', 'leak_rate': 1.0},
         ],
-        'readout_hidden_size': 128,  # Reduced
+        'readout_hidden_size': 128,
         
-        # Training optimizations
+        # Training parameters
         'BATCH_SIZE': shared_config['BATCH_SIZE'],
         'BLOCK_SIZE': shared_config['BLOCK_SIZE'],
-        'EVAL_INTERVAL': shared_config['EVAL_INTERVAL'] * 2,  # Less frequent evaluation
-        'EVAL_ITER': 25,  # Fewer evaluation batches
+        'EVAL_INTERVAL': shared_config['EVAL_INTERVAL'] * 2,
+        'EVAL_ITER': 25,
         'DEVICE': shared_config['DEVICE'],
         'EPOCHS': shared_config['EPOCHS'],
         'SAVE_PATH': shared_config['RESERVOIR_SAVE_PATH'],
-        
         'steps_per_epoch': actual_steps_per_epoch,
         'total_steps': total_steps,
         'warmup_steps': warmup_steps,
         'accumulation_steps': accumulation_steps,
         
-        # OPTIMIZATION: More aggressive learning parameters
+        # Learning parameters
         'LR': 5e-4,
         'weight_decay': 0.01,
-        
         'temperature': 0.8,
         'top_k': 50,
         'top_p': 0.9,
     }
     
-    print(f"Training configuration:")
+    # TPU-specific adjustments
+    if shared_config['USE_TPU']:
+        # TPUs often benefit from slightly different hyperparameters
+        config['LR'] = config['LR'] * 1.2  # Slightly higher LR for TPUs
+        config['BATCH_SIZE'] = config['BATCH_SIZE'] * 2  # TPUs handle larger batches
+    
+    print(f"Training configuration (TPU={'Yes' if shared_config['USE_TPU'] else 'No'}):")
     print(f"  Dataset size: {len(train_loader.dataset):,} sequences")
     print(f"  Steps per epoch: {steps_per_epoch:,}")
     print(f"  Total training steps: {total_steps:,}")
@@ -886,79 +973,105 @@ def get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
-# Training function with all optimizations
 def train_optimized_reservoir_model(model, train_loader, val_loader, config, tokenizer, shared_config):
-    """Optimized training loop with mixed precision, gradient accumulation, and cosine scheduling."""
-    
+    """Optimized training loop with TPU/GPU compatibility."""
     criterion = nn.CrossEntropyLoss()
     
-    # OPTIMIZATION: Use fused AdamW if available
-    try:
-        from torch.optim import AdamW
-        optimizer = AdamW(model.parameters(), lr=config['LR'], weight_decay=config['weight_decay'],
-                         betas=(0.9, 0.95), fused=True)  # Fused optimizer
-    except:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=config['LR'], weight_decay=config['weight_decay'],
-                                     betas=(0.9, 0.95))
+    # Optimizer setup - TPUs work better with different optimizer settings
+    if shared_config['USE_TPU']:
+        try:
+            import torch_xla.core.xla_model as xm
+            optimizer = torch.optim.AdamW(model.parameters(), lr=config['LR'], 
+                                         weight_decay=config['weight_decay'],
+                                         betas=(0.9, 0.95))
+            # TPUs don't need fused optimizers
+        except ImportError:
+            optimizer = torch.optim.AdamW(model.parameters(), lr=config['LR'], 
+                                         weight_decay=config['weight_decay'],
+                                         betas=(0.9, 0.95))
+    else:
+        try:
+            from torch.optim import AdamW
+            optimizer = AdamW(model.parameters(), lr=config['LR'], 
+                             weight_decay=config['weight_decay'],
+                             betas=(0.9, 0.95), fused=True)
+        except:
+            optimizer = torch.optim.AdamW(model.parameters(), lr=config['LR'], 
+                                         weight_decay=config['weight_decay'],
+                                         betas=(0.9, 0.95))
     
     scheduler = get_cosine_schedule_with_warmup(optimizer, config['warmup_steps'], config['total_steps'])
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = get_grad_scaler(shared_config['USE_TPU'])
     
-    # OPTIMIZATION: Pre-allocate lists with expected size
-    expected_samples = config['total_steps'] * config['accumulation_steps']
+    # Pre-allocate lists
     train_losses = []
     val_perplexities = []
     learning_rates = []
     steps = []
-    
     total_batches = 0
     optimizer_steps = 0
     accumulation_steps = config['accumulation_steps']
     
-    print("Starting Fast Reservoir Model training...")
-    
+    print(f"Starting {'TPU' if shared_config['USE_TPU'] else 'GPU'} Reservoir Model training...")
     model.train()
     optimizer.zero_grad()
     
-    # OPTIMIZATION: Reduce Python overhead in training loop
     device = config['DEVICE']
     eval_interval = config['EVAL_INTERVAL'] // accumulation_steps
     
     for epoch in range(config['EPOCHS']):
         print(f"\n--- Epoch {epoch + 1}/{config['EPOCHS']} ---")
-        
-        # OPTIMIZATION: Remove tqdm if it's causing overhead, or reduce update frequency
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}", 
-                   mininterval=1.0)  # Update less frequently
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}", mininterval=1.0)
         
         for x, y in pbar:
             total_batches += 1
             
-            # OPTIMIZATION: Move to device without non_blocking (can cause issues)
-            x, y = x.to(device), y.to(device)
+            # TPU-specific handling
+            if shared_config['USE_TPU']:
+                try:
+                    import torch_xla.core.xla_model as xm
+                    xm.send_cpu_data_to_device(x, device)
+                    xm.send_cpu_data_to_device(y, device)
+                except:
+                    x, y = x.to(device), y.to(device)
+            else:
+                x, y = x.to(device), y.to(device)
             
-            # Forward pass
-            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=True):
+            # Forward pass with appropriate context
+            with get_autocast_context(device, shared_config['USE_TPU']):
                 logits = model(x)
                 B, T, C = logits.shape
                 loss = criterion(logits.view(B * T, C), y.view(B * T))
                 loss = loss / accumulation_steps
             
-            scaler.scale(loss).backward()
+            # Backward pass
+            if shared_config['USE_TPU']:
+                loss.backward()
+            else:
+                scaler.scale(loss).backward()
             
+            # Optimization step
             if total_batches % accumulation_steps == 0:
                 optimizer_steps += 1
                 
-                # OPTIMIZATION: Skip gradient clipping if not necessary
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if shared_config['USE_TPU']:
+                    try:
+                        import torch_xla.core.xla_model as xm
+                        xm.reduce_gradients(optimizer)
+                        optimizer.step()
+                        xm.mark_step()  # Critical for TPU performance
+                    except:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
                 
-                scaler.step(optimizer)
-                scaler.update()
                 scheduler.step()
                 optimizer.zero_grad()
                 
-                # OPTIMIZATION: Update progress less frequently
+                # Progress update
                 if optimizer_steps % 10 == 0:
                     current_lr = scheduler.get_last_lr()[0]
                     pbar.set_postfix({
@@ -967,23 +1080,21 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
                         'step': f"{optimizer_steps}/{config['total_steps']}"
                     })
             
-            # Store metrics less frequently
+            # Store metrics
             if total_batches % accumulation_steps == 0:
                 train_losses.append(loss.item() * accumulation_steps)
                 learning_rates.append(scheduler.get_last_lr()[0])
             
-            # Less frequent evaluation
+            # Evaluation
             if optimizer_steps > 0 and optimizer_steps % eval_interval == 0:
-                val_loss = eval_reservoir_model(model, val_loader, config)
+                val_loss = eval_reservoir_model(model, val_loader, config, shared_config)
                 perplexity = np.exp(val_loss)
                 val_perplexities.append(perplexity)
                 steps.append(optimizer_steps)
-                
                 print(f"\nStep {optimizer_steps}: Val Loss: {val_loss:.4f}, Perplexity: {perplexity:.4f}")
                 
-                # OPTIMIZATION: Generate shorter samples during training
                 generated_text = generate_from_reservoir(
-                    model, "Once upon a time", 50, config, tokenizer  # Shorter generation
+                    model, "Once upon a time", 50, config, tokenizer, shared_config
                 )
                 print("Generated:", generated_text[:100] + "...")
             
@@ -1001,102 +1112,142 @@ def train_optimized_reservoir_model(model, train_loader, val_loader, config, tok
         'steps': steps
     }
 
-optimized_reservoir_config = create_optimized_reservoir_config(SHARED_CONFIG, train_loader)
-
-optimized_model = OptimizedDeepReservoirModel(
-    vocab_size=tokenizer.vocab_size,
-    config=optimized_reservoir_config
-).to(optimized_reservoir_config['DEVICE'])
-
-print(f"Optimized model: {sum(p.numel() for p in optimized_model.parameters() if p.requires_grad):,} trainable parameters")
-
-# Create enhanced configuration
-enhanced_config = create_enhanced_reservoir_config(SHARED_CONFIG, train_loader)
-
-# Initialize enhanced model
-enhanced_model = EnhancedDeepReservoirModel(
-    vocab_size=tokenizer.vocab_size,
-    config=enhanced_config
-).to(enhanced_config['DEVICE'])
-
-print(f"Enhanced model: {sum(p.numel() for p in enhanced_model.parameters() if p.requires_grad):,} trainable parameters")
-
-
 # -----------------------------------------------------------------------------
-# Train the Enhanced Reservoir Model  
+# TPU Multiprocessing Function
 # -----------------------------------------------------------------------------
 
-# Train the enhanced model
-training_history = train_optimized_reservoir_model(
-    enhanced_model, 
-    train_loader, 
-    val_loader, 
-    enhanced_config,
-    tokenizer,
-    SHARED_CONFIG
-)
+def _mp_fn(index, *args):
+    """Wrapper function for TPU multiprocessing."""
+    try:
+        import torch_xla.core.xla_model as xm
+        xm.rendezvous('train_loop')
+        # Re-run the training with proper TPU initialization
+        optimized_reservoir_config = create_optimized_reservoir_config(SHARED_CONFIG, train_loader)
+        optimized_model = OptimizedDeepReservoirModel(
+            vocab_size=tokenizer.vocab_size,
+            config=optimized_reservoir_config
+        ).to(optimized_reservoir_config['DEVICE'])
+        
+        print(f"Optimized model: {sum(p.numel() for p in optimized_model.parameters() if p.requires_grad):,} trainable parameters")
+        
+        # Train the model
+        training_history = train_optimized_reservoir_model(
+            optimized_model, 
+            train_loader, 
+            val_loader, 
+            optimized_reservoir_config,
+            tokenizer,
+            SHARED_CONFIG
+        )
+        
+        # Save the model (TPUs need to save from master process)
+        if index == 0:
+            torch.save(optimized_model.state_dict(), optimized_reservoir_config['SAVE_PATH'])
+            print(f"Model saved to {optimized_reservoir_config['SAVE_PATH']}")
+        
+        # Generate and print samples
+        if index == 0:
+            print("=" * 80)
+            print("Model Comparison - Text Generation")
+            print("=" * 80)
+            prompt = "Once upon a time, there was a little"
+            print(f"Prompt: '{prompt}'\n")
+            
+            reservoir_text = generate_from_reservoir(
+                optimized_model, 
+                prompt, 
+                SHARED_CONFIG['MAX_OUT_TOKENS'], 
+                optimized_reservoir_config,
+                tokenizer,
+                SHARED_CONFIG
+            )
+            print("Reservoir Model Output:")
+            print("-" * 50)
+            print(reservoir_text)
+            print("\n")
+    except Exception as e:
+        print(f"Error in TPU training: {str(e)}")
+        raise
 
-# Evaluate reservoir quality periodically
-if enhanced_config.get('EVAL_INTERVAL', 0) > 0:
-    reservoir_metrics = evaluate_reservoir_quality(enhanced_model, val_loader, enhanced_config)
-    print(f"Reservoir Quality - Memory Capacity: {reservoir_metrics['memory_capacity']:.4f}, "
-          f"State Separation: {reservoir_metrics['state_separation']:.4f}")
+# -----------------------------------------------------------------------------
+# Main Execution
+# -----------------------------------------------------------------------------
 
-# Update visualization to include reservoir metrics
-plt.figure(figsize=(20, 5))
-plt.subplot(1, 4, 1)
-plt.plot(training_history['train_losses'])
-plt.title('Training Loss')
-plt.xlabel('Batch')
-plt.ylabel('Loss')
-plt.grid(True)
+# Main execution
+if SHARED_CONFIG['USE_TPU']:
+    try:
+        import torch_xla.distributed.xla_multiprocessing as xmp
+        print("Starting training on TPU...")
+        xmp.spawn(_mp_fn, args=(), nprocs=8, start_method='fork')
+    except ImportError:
+        print("Error: TPU requested but torch_xla not installed. Please install torch_xla to use TPUs.")
+        SHARED_CONFIG['USE_TPU'] = False
+        # Fall back to GPU training
+        # (The rest of the code will run normally with USE_TPU=False)
 
-plt.subplot(1, 4, 2)
-plt.plot(training_history['steps'], training_history['val_perplexities'], marker='o')
-plt.title('Validation Perplexity')
-plt.xlabel('Steps')
-plt.ylabel('Perplexity')
-plt.grid(True)
-
-plt.subplot(1, 4, 3)
-plt.plot(training_history['learning_rates'])
-plt.title('Learning Rate Schedule')
-plt.xlabel('Batch')
-plt.ylabel('Learning Rate')
-plt.grid(True)
-
-# Add reservoir quality metrics plot
-if 'reservoir_metrics' in locals():
-    plt.subplot(1, 4, 4)
-    plt.bar(['Memory Capacity', 'State Separation'], 
-            [reservoir_metrics['memory_capacity'], reservoir_metrics['state_separation']])
-    plt.title('Reservoir Quality Metrics')
-    plt.ylabel('Score')
+if not SHARED_CONFIG['USE_TPU']:
+    print("Starting training on GPU/CPU...")
+    optimized_reservoir_config = create_optimized_reservoir_config(SHARED_CONFIG, train_loader)
+    optimized_model = OptimizedDeepReservoirModel(
+        vocab_size=tokenizer.vocab_size,
+        config=optimized_reservoir_config
+    ).to(optimized_reservoir_config['DEVICE'])
+    
+    print(f"Optimized model: {sum(p.numel() for p in optimized_model.parameters() if p.requires_grad):,} trainable parameters")
+    
+    # Train the model
+    training_history = train_optimized_reservoir_model(
+        optimized_model, 
+        train_loader, 
+        val_loader, 
+        optimized_reservoir_config,
+        tokenizer,
+        SHARED_CONFIG
+    )
+    
+    # Save the model
+    torch.save(optimized_model.state_dict(), optimized_reservoir_config['SAVE_PATH'])
+    print(f"Model saved to {optimized_reservoir_config['SAVE_PATH']}")
+    
+    # Generate and print samples
+    print("=" * 80)
+    print("Model Comparison - Text Generation")
+    print("=" * 80)
+    prompt = "Once upon a time, there was a little"
+    print(f"Prompt: '{prompt}'\n")
+    
+    reservoir_text = generate_from_reservoir(
+        optimized_model, 
+        prompt, 
+        SHARED_CONFIG['MAX_OUT_TOKENS'], 
+        optimized_reservoir_config,
+        tokenizer,
+        SHARED_CONFIG
+    )
+    print("Reservoir Model Output:")
+    print("-" * 50)
+    print(reservoir_text)
+    print("\n")
+    
+    # Plot results
+    plt.figure(figsize=(15, 5))
+    plt.subplot(1, 3, 1)
+    plt.plot(training_history['train_losses'])
+    plt.title('Training Loss')
+    plt.xlabel('Batch')
+    plt.ylabel('Loss')
     plt.grid(True)
-
-plt.tight_layout()
-plt.show()
-
-# Save the enhanced model
-torch.save(enhanced_model.state_dict(), enhanced_config['SAVE_PATH'])
-
-
-print("=" * 80)
-print("Model Comparison - Text Generation")
-print("=" * 80)
-
-prompt = "Once upon a time, there was a little"
-print(f"Prompt: '{prompt}'\n")
-
-# Generate from Enhanced Reservoir model
-enhanced_text = generate_from_reservoir(
-    enhanced_model, 
-    prompt, 
-    SHARED_CONFIG['MAX_OUT_TOKENS'], 
-    enhanced_config,
-    tokenizer
-)
-print("Enhanced Reservoir Model Output:")
-print("-" * 50)
-print(enhanced_text)
-print("\n")
+    plt.subplot(1, 3, 2)
+    plt.plot(training_history['steps'], training_history['val_perplexities'], marker='o')
+    plt.title('Validation Perplexity')
+    plt.xlabel('Steps')
+    plt.ylabel('Perplexity')
+    plt.grid(True)
+    plt.subplot(1, 3, 3)
+    plt.plot(training_history['learning_rates'])
+    plt.title('Learning Rate Schedule')
+    plt.xlabel('Batch')
+    plt.ylabel('Learning Rate')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
