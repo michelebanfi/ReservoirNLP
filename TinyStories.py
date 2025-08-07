@@ -439,14 +439,11 @@ def generate_from_reservoir(model, context_str, max_new_tokens, config, tokenize
             sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
             sorted_indices_to_remove[..., 0] = 0
 
-            # --- THIS IS THE LINE TO FIX ---
-            # We get a 1D tensor from boolean indexing, so we unsqueeze it to make it 2D.
-            indices_to_remove = sorted_indices[sorted_indices_to_remove].unsqueeze(0)
-            # --- END FIX ---
+            # Fixed implementation: mask the sorted logits directly, then scatter back
+            sorted_logits[sorted_indices_to_remove] = float('-inf')
+            logits.scatter_(1, sorted_indices, sorted_logits)
 
-            logits.scatter_(1, indices_to_remove, float('-inf'))
-
-        if top_k > 0:
+        if top_k > 0 and top_k < logits.size(-1):
             top_k_logits, top_k_indices = torch.topk(logits, top_k)
             filtered_logits = torch.full_like(logits, float('-inf'))
             filtered_logits.scatter_(1, top_k_indices, top_k_logits)
