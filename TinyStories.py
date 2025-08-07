@@ -363,9 +363,12 @@ class HybridReservoirBlock(nn.Module):
             ssm_states.append(h)
         ssm_states = torch.stack(ssm_states[1:], dim=1)
         
+        # Apply readout to SSM states to match embedding dimension
+        ssm_out = self.readout(ssm_states)
+        
         # Combine paths
         gate = self.gate(x)
-        return reservoir_out * gate + ssm_states * (1 - gate)
+        return reservoir_out * gate + ssm_out * (1 - gate)
 
 
 class EnhancedDeepReservoirModel(nn.Module):
@@ -383,10 +386,7 @@ class EnhancedDeepReservoirModel(nn.Module):
         
         # Reservoir blocks - use hybrid implementation
         self.blocks = nn.ModuleList([
-            HybridReservoirBlock({
-                **config,
-                'reservoir_size': config['reservoir_size'] // (i + 1)
-            }) for i in range(config['num_blocks'])
+            HybridReservoirBlock(config) for _ in range(config['num_blocks'])
         ])
         
         # Output head
