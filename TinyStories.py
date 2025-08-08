@@ -973,6 +973,9 @@ def get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps):
         if step < warmup_steps:
             # Linear warmup
             return step / warmup_steps
+        elif total_steps <= warmup_steps:
+            # Edge case: no cosine annealing phase, maintain warmup final value
+            return 1.0
         else:
             # Cosine annealing
             progress = (step - warmup_steps) / (total_steps - warmup_steps)
