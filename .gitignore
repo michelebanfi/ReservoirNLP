@@ -1,1 +1,55 @@
+# Virtual environments
 venv/
+.venv/
+env/
+.env/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyTorch and model files
+*.pt
+*.pth
+models/
+
+# Data files
+*.txt
+*.csv
+*.json
+data/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Matplotlib plots
+*.png
+*.jpg
+*.jpeg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
