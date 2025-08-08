@@ -25,14 +25,18 @@ SHARED_CONFIG = {
     'TRANSFORMER_SAVE_PATH': 'models/tiny_lm_trained.pt'
 }
 
-def get_device(use_tpu=False):
+def get_device(use_tpu=False, initialize_xla=True):
     """Returns appropriate device based on configuration."""
     if use_tpu:
         try:
             import torch_xla.core.xla_model as xm
-            import torch_xla.distributed.xla_multiprocessing as xmp
-            print("TPU detected and initialized")
-            return xm.xla_device()
+            if initialize_xla:
+                print("TPU detected and initialized")
+                return xm.xla_device()
+            else:
+                # Return a placeholder when TPU is requested but XLA should not be initialized yet
+                print("TPU requested - will initialize after spawn")
+                return 'xla'  # Placeholder that will be replaced later
         except ImportError:
             print("Warning: TPU requested but torch_xla not installed. Falling back to GPU.")
             return 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -40,7 +44,8 @@ def get_device(use_tpu=False):
         return 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # Update the SHARED_CONFIG with the proper device
-SHARED_CONFIG['DEVICE'] = get_device(SHARED_CONFIG['USE_TPU'])
+# Don't initialize XLA device yet if TPU is requested - delay until after spawn
+SHARED_CONFIG['DEVICE'] = get_device(SHARED_CONFIG['USE_TPU'], initialize_xla=False)
 print(f"Using device: {SHARED_CONFIG['DEVICE']} (TPU={'Yes' if SHARED_CONFIG['USE_TPU'] else 'No'})")
 os.makedirs("models", exist_ok=True)
 
@@ -174,7 +179,7 @@ def prepare_data_efficiently(shared_config):
     
     # TPU-specific optimizations
     persistent_workers = not shared_config['USE_TPU']
-    pin_memory = shared_config['DEVICE'] != 'cpu' and not shared_config['USE_TPU']
+    pin_memory = shared_config['DEVICE'] not in ['cpu', 'xla'] and not shared_config['USE_TPU']
     
     train_txt_path, val_txt_path = download_and_save_dataset(max_stories=shared_config["MAX_STORIES"])
     train_tokenized_path = train_txt_path.replace('.txt', '.npy')
@@ -206,8 +211,8 @@ def prepare_data_efficiently(shared_config):
         persistent_workers=persistent_workers
     )
     
-    # TPU-specific data loader wrapping
-    if shared_config['USE_TPU']:
+    # TPU-specific data loader wrapping - only if device is actually initialized
+    if shared_config['USE_TPU'] and shared_config['DEVICE'] != 'xla':
         try:
             import torch_xla.distributed.parallel_loader as pl
             train_loader = pl.MpDeviceLoader(train_loader, shared_config['DEVICE'])
@@ -249,7 +254,8 @@ class TrueReservoir(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.leak_rate = leak_rate
-        self.device = device
+        # Handle the placeholder 'xla' device
+        self.device = device if device != 'xla' else 'cpu'  # Use CPU temporarily for initialization
         
         # Fixed reservoir weights (non-trainable)
         self.W_in = nn.Linear(input_size, hidden_size, bias=False)
@@ -273,7 +279,9 @@ class TrueReservoir(nn.Module):
         # Reservoir weights
         with torch.no_grad():
             W = self.W_res.weight.data
-            mask = (torch.rand(W.shape, device=self.device) > sparsity).float()
+            # Use the actual device for tensor creation, fallback to CPU for 'xla'
+            device_for_init = self.device if self.device != 'xla' else 'cpu'
+            mask = (torch.rand(W.shape, device=device_for_init) > sparsity).float()
             W.normal_(0, 1)
             W *= mask
             
@@ -284,8 +292,9 @@ class TrueReservoir(nn.Module):
     
     def forward(self, x, initial_state=None):
         batch_size, seq_len, _ = x.shape
-        states = torch.zeros(batch_size, seq_len, self.hidden_size, device=self.device)
-        prev_state = initial_state if initial_state is not None else self.initial_state.expand(batch_size, self.hidden_size)
+        device = x.device  # Use the device of the input tensor
+        states = torch.zeros(batch_size, seq_len, self.hidden_size, device=device)
+        prev_state = initial_state if initial_state is not None else self.initial_state.expand(batch_size, self.hidden_size).to(device)
         
         for t in range(seq_len):
             input_t = x[:, t, :]
@@ -518,13 +527,12 @@ class OptimizedReservoirBlock(nn.Module):
         
         for res_config in config['reservoirs_per_block']:
             self.reservoirs.append(
-                OptimizedParallelReservoir(
+                TrueReservoir(
                     input_size=config['embedding_dim'],
                     hidden_size=res_config['reservoir_size'],
-                    window_size=res_config['window_size'],
                     spectral_radius=res_config['spectral_radius'],
                     sparsity=res_config.get('sparsity', 0.1),
-                    activation=res_config.get('activation', 'gelu'),  # GELU often works better
+                    leak_rate=res_config.get('leak_rate', 1.0),
                     device=config['DEVICE']
                 )
             )
@@ -563,10 +571,10 @@ class OptimizedReservoirBlock(nn.Module):
     def forward(self, x):
         # Use gradient checkpointing for memory efficiency during training
         if self.training and hasattr(torch.utils.checkpoint, 'checkpoint'):
-            reservoir_states = [torch.utils.checkpoint.checkpoint(res, x, use_reentrant=False) 
+            reservoir_states = [torch.utils.checkpoint.checkpoint(res, x, None, use_reentrant=False) 
                               for res in self.reservoirs]
         else:
-            reservoir_states = [res(x) for res in self.reservoirs]
+            reservoir_states = [res(x, None) for res in self.reservoirs]
             
         combined_states = torch.cat(reservoir_states, dim=-1)
         update_vector = self.readout(combined_states)
@@ -786,10 +794,10 @@ def create_optimized_reservoir_config(shared_config, train_loader):
         
         # Reservoir parameters
         'reservoirs_per_block': [
-            {'reservoir_size': 128, 'window_size': 16, 'spectral_radius': 1.0, 
-             'sparsity': 0.3, 'activation': 'relu', 'leak_rate': 1.0},
-            {'reservoir_size': 192, 'window_size': 32, 'spectral_radius': 1.0, 
-             'sparsity': 0.25, 'activation': 'relu', 'leak_rate': 1.0},
+            {'reservoir_size': 128, 'spectral_radius': 1.0, 
+             'sparsity': 0.3, 'leak_rate': 1.0},
+            {'reservoir_size': 192, 'spectral_radius': 1.0, 
+             'sparsity': 0.25, 'leak_rate': 1.0},
         ],
         'readout_hidden_size': 128,
         
@@ -1121,12 +1129,23 @@ def _mp_fn(index, *args):
     try:
         import torch_xla.core.xla_model as xm
         xm.rendezvous('train_loop')
+        
+        # Now properly initialize the XLA device
+        device = xm.xla_device()
+        print(f"Process {index}: TPU device initialized: {device}")
+        
+        # Update the shared config with the real device
+        tpu_shared_config = SHARED_CONFIG.copy()
+        tpu_shared_config['DEVICE'] = device
+        
         # Re-run the training with proper TPU initialization
-        optimized_reservoir_config = create_optimized_reservoir_config(SHARED_CONFIG, train_loader)
+        optimized_reservoir_config = create_optimized_reservoir_config(tpu_shared_config, train_loader)
+        optimized_reservoir_config['DEVICE'] = device  # Make sure config uses real device
+        
         optimized_model = OptimizedDeepReservoirModel(
             vocab_size=tokenizer.vocab_size,
             config=optimized_reservoir_config
-        ).to(optimized_reservoir_config['DEVICE'])
+        ).to(device)
         
         print(f"Optimized model: {sum(p.numel() for p in optimized_model.parameters() if p.requires_grad):,} trainable parameters")
         
@@ -1137,7 +1156,7 @@ def _mp_fn(index, *args):
             val_loader, 
             optimized_reservoir_config,
             tokenizer,
-            SHARED_CONFIG
+            tpu_shared_config
         )
         
         # Save the model (TPUs need to save from master process)
@@ -1156,10 +1175,10 @@ def _mp_fn(index, *args):
             reservoir_text = generate_from_reservoir(
                 optimized_model, 
                 prompt, 
-                SHARED_CONFIG['MAX_OUT_TOKENS'], 
+                tpu_shared_config['MAX_OUT_TOKENS'], 
                 optimized_reservoir_config,
                 tokenizer,
-                SHARED_CONFIG
+                tpu_shared_config
             )
             print("Reservoir Model Output:")
             print("-" * 50)
@@ -1178,7 +1197,8 @@ if SHARED_CONFIG['USE_TPU']:
     try:
         import torch_xla.distributed.xla_multiprocessing as xmp
         print("Starting training on TPU...")
-        xmp.spawn(_mp_fn, args=(), nprocs=8, start_method='fork')
+        # Use default nprocs=None to let XLA determine the number of processes
+        xmp.spawn(_mp_fn, args=(), start_method='spawn')
     except ImportError:
         print("Error: TPU requested but torch_xla not installed. Please install torch_xla to use TPUs.")
         SHARED_CONFIG['USE_TPU'] = False
