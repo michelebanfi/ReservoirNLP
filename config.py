@@ -23,7 +23,7 @@ class TrainConfig:
     dropout: float = 0.3
 
     # Training
-    epochs: int = 2
+    epochs: int = 12
     lr: float = 3e-4
     weight_decay: float = 5e-3
     label_smoothing: float = 0.05
