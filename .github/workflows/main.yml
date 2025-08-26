@@ -20,5 +20,5 @@ jobs:
           key: ${{ secrets.KAGGLE_KEY }}
           title: "Run Model Training"
           custom_script: |
-            python3 -m simple_reservoir.run_small
+            python3 -m run_small
           enable_gpu: true
