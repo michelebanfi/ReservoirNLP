@@ -15,7 +15,7 @@ class TrainConfig:
     data_path: str = "data/tiny.txt"
 
     # Model (ESN)
-    hidden_size: int = 512
+    hidden_size: int = 768
     spectral_radius: float = 0.85
     sparsity: float = 0.9
     leak_rate: float = 0.25

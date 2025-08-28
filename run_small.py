@@ -99,7 +99,7 @@ def main():
 
     # 5) Quick sample generation (light sampling)
     model.eval()
-    context = "once "
+    context = "Who are you Alice?"
     x = torch.tensor([tok.encode(context)], dtype=torch.long, device=device)
     with torch.no_grad():
         for _ in range(100):
