@@ -20,7 +20,7 @@ class TrainConfig:
     sparsity: float = 0.9
     leak_rate: float = 0.25
     readout_dim: int = 512
-    dropout: float = 0.3
+    dropout: float = 0.5
 
     # Training
     epochs: int = 12

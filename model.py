@@ -10,7 +10,7 @@ class ESNConfig:
     input_size: int
     hidden_size: int = 256
     spectral_radius: float = 0.9
-    sparsity: float = 0.9  # fraction of zeros
+    sparsity: float = 0.9
     leak_rate: float = 0.3
     readout_dim: int = 256
 
@@ -35,7 +35,10 @@ class ESNLanguageModel(nn.Module):
         self.readout = nn.Sequential(
             nn.Linear(cfg.hidden_size, emb_dim),
             nn.GELU(),
-            nn.Dropout(0.0),  # set from runner
+            nn.Dropout(0.0),
+            nn.Linear(emb_dim, emb_dim),
+            nn.GELU(),
+            nn.Dropout(0.0),
             nn.Linear(emb_dim, emb_dim),
         )
         self.ln = nn.LayerNorm(emb_dim)
