@@ -12,20 +12,50 @@ from config import TrainConfig
 
 
 def build_tiny_corpus(data_path: str | None = None):
-    # Prefer a local tiny file if available; else use a built-in toy corpus
+    # Load all .txt files from the data directory
     if data_path is None:
-        data_path = os.path.join(os.path.dirname(__file__), 'data', 'tiny.txt')
-    if os.path.exists(data_path):
-        with open(data_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    texts = [
-        "hello world\n",
-        "how are you\n",
-        "once upon a time\n",
-        "tiny stories are fun\n",
-        "abc abc abc\n",
-    ]
-    return ''.join(texts)
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    else:
+        # If a specific file path is provided, use its directory
+        if os.path.isfile(data_path):
+            data_dir = os.path.dirname(data_path)
+        else:
+            data_dir = data_path
+    
+    all_texts = []
+    txt_files = []
+    
+    # Find all .txt files in the data directory
+    if os.path.exists(data_dir):
+        for filename in os.listdir(data_dir):
+            if filename.endswith('.txt'):
+                txt_files.append(os.path.join(data_dir, filename))
+    
+    # Read all .txt files
+    for txt_file in sorted(txt_files):
+        try:
+            with open(txt_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                all_texts.append(content)
+                print(f"Loaded {len(content)} characters from {os.path.basename(txt_file)}")
+        except Exception as e:
+            print(f"Warning: Could not read {txt_file}: {e}")
+    
+    # If no .txt files found, use fallback
+    if not all_texts:
+        print("No .txt files found in data directory, using fallback corpus")
+        texts = [
+            "hello world\n",
+            "how are you\n",
+            "once upon a time\n",
+            "tiny stories are fun\n",
+            "abc abc abc\n",
+        ]
+        return ''.join(texts)
+    
+    combined_text = '\n'.join(all_texts)
+    print(f"Total corpus size: {len(combined_text)} characters from {len(txt_files)} files")
+    return combined_text
 
 
 def main():

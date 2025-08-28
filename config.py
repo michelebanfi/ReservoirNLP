@@ -12,7 +12,7 @@ class TrainConfig:
     # Data
     block_size: int = 512
     batch_size: int = 64
-    data_path: str = "data/tiny.txt"
+    data_path: str = "data"  # directory containing .txt files
 
     # Model (ESN)
     hidden_size: int = 768
@@ -29,7 +29,7 @@ class TrainConfig:
     label_smoothing: float = 0.05
     eval_interval: int = 100
     ckpt_path: str = "models/small_esn.pt"
-    patience: int | None = 12  # early stopping eval windows; None to disable
+    patience: int | None = None  # early stopping eval windows; None to disable
 
     # Runtime
     device: str | None = None  # autodetect if None
