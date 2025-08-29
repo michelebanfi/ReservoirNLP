@@ -11,7 +11,7 @@ class TrainConfig:
 
     # Data
     block_size: int = 512
-    batch_size: int = 64
+    batch_size: int = 128
     data_path: str = "data"  # directory containing .txt files
 
     # Model (ESN)
