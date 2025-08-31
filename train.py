@@ -15,6 +15,7 @@ def evaluate(model: ESNLanguageModel, loader: DataLoader, device: str) -> float:
     n = 0
     criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
+        # evaluate on a small subset to keep training snappy
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             logits = model(x)
@@ -22,7 +23,7 @@ def evaluate(model: ESNLanguageModel, loader: DataLoader, device: str) -> float:
             loss = criterion(logits.view(B*T, C), y.view(B*T))
             loss_total += loss.item()
             n += 1
-            if n >= 50:  # cap for speed
+            if n >= 10:  # tighter cap for speed; configurable if needed
                 break
     model.train()
     return loss_total / max(1, n)
@@ -42,9 +43,16 @@ def _build_scheduler(optimizer, warmup_steps: int, total_steps: int):
 def train(model: ESNLanguageModel, train_loader: DataLoader, val_loader: DataLoader, device: str,
           epochs: int = 2, lr: float = 3e-3, eval_interval: int = 200, ckpt_path: str | None = None,
           weight_decay: float = 1e-2, label_smoothing: float = 0.0, patience: int | None = None) -> Dict:
+    # speed-friendly matmul defaults
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
     model.to(device)
+    # ensure sparse buffer is on device (no-op for dense)
+    if hasattr(model, "W_sparse") and model.W_sparse is not None:
+        model.W_sparse = model.W_sparse.to(device)
     optim = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.startswith('cuda') and torch.cuda.is_available()))
 
     step = 0
     history = {"train_loss": [], "val_loss": [], "steps": []}
@@ -59,13 +67,15 @@ def train(model: ESNLanguageModel, train_loader: DataLoader, val_loader: DataLoa
         pbar = tqdm(train_loader, desc=f"Epoch {ep+1}")
         for x, y in pbar:
             x, y = x.to(device), y.to(device)
-            logits = model(x)
-            B, T, C = logits.shape
-            loss = criterion(logits.view(B*T, C), y.view(B*T))
-            optim.zero_grad()
-            loss.backward()
+            with torch.cuda.amp.autocast(enabled=(device.startswith('cuda') and torch.cuda.is_available())):
+                logits = model(x)
+                B, T, C = logits.shape
+                loss = criterion(logits.view(B*T, C), y.view(B*T))
+            optim.zero_grad(set_to_none=True)
+            scaler.scale(loss).backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optim.step()
+            scaler.step(optim)
+            scaler.update()
             scheduler.step()
 
             step += 1

@@ -10,26 +10,28 @@ class TrainConfig:
     bpe_train_split: float = 0.9  # fraction of raw text used to train BPE
 
     # Data
-    block_size: int = 512
-    batch_size: int = 128
+    block_size: int = 256
+    batch_size: int = 64
     data_path: str = "data"  # directory containing .txt files
 
     # Model (ESN)
-    hidden_size: int = 768
+    hidden_size: int = 512
     spectral_radius: float = 0.85
     sparsity: float = 0.9
     leak_rate: float = 0.25
     readout_dim: int = 512
     dropout: float = 0.5
+    use_sparse_reservoir: bool = True
 
     # Training
-    epochs: int = 12
+    epochs: int = 6
     lr: float = 3e-4
     weight_decay: float = 5e-3
     label_smoothing: float = 0.05
-    eval_interval: int = 100
+    eval_interval: int = 200
     ckpt_path: str = "models/small_esn.pt"
     patience: int | None = None  # early stopping eval windows; None to disable
+    eval_batches: int = 10  # number of batches to use during eval for speed
 
     # Runtime
     device: str | None = None  # autodetect if None

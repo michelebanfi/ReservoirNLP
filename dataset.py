@@ -26,6 +26,7 @@ def create_dataloaders(tokens: np.ndarray, block_size: int, batch_size: int, spl
     val_tokens = tokens[n_train:]
     train_ds = CharDataset(train_tokens, block_size)
     val_ds = CharDataset(val_tokens, block_size)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=4)
+    common = dict(num_workers=4, pin_memory=True, persistent_workers=True)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True, **common)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False, **common)
     return train_loader, val_loader

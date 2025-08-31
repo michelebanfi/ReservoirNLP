@@ -13,6 +13,8 @@ class ESNConfig:
     sparsity: float = 0.9
     leak_rate: float = 0.3
     readout_dim: int = 256
+    # Performance tweaks
+    use_sparse_reservoir: bool = True  # store W as sparse and use sparse-dense mm
 
 class ESNLanguageModel(nn.Module):
     """Minimal Echo State Network LM:
@@ -27,8 +29,17 @@ class ESNLanguageModel(nn.Module):
         self.embed = nn.Embedding(vocab_size, emb_dim)
         # fixed reservoir weights
         self.W_in = nn.Linear(emb_dim, cfg.hidden_size, bias=False)
-        self.W = nn.Linear(cfg.hidden_size, cfg.hidden_size, bias=False)
-        for p in list(self.W_in.parameters()) + list(self.W.parameters()):
+        # If using sparse reservoir, hold as registered buffer (no grad)
+        self.use_sparse = bool(cfg.use_sparse_reservoir)
+        if self.use_sparse:
+            self.register_buffer("W_sparse", None, persistent=False)
+            # keep a dense tensor only during init; not used after
+            self.register_buffer("_W_dense_tmp", torch.empty(0), persistent=False)
+        else:
+            self.W = nn.Linear(cfg.hidden_size, cfg.hidden_size, bias=False)
+            for p in self.W.parameters():
+                p.requires_grad = False
+        for p in self.W_in.parameters():
             p.requires_grad = False
         self._init_reservoir()
         # Two-layer MLP readout for a touch more capacity
@@ -50,18 +61,34 @@ class ESNLanguageModel(nn.Module):
         with torch.no_grad():
             self.W_in.weight.uniform_(-0.1, 0.1)
             H = self.cfg.hidden_size
-            W = self.W.weight
-            W.zero_()
-            # create sparse random matrix
-            mask = (torch.rand_like(W) > self.cfg.sparsity).float()
-            W.uniform_(-1.0, 1.0)
-            W.mul_(mask)
-            # scale to spectral radius approx via power iteration
-            v = torch.randn(H, 1, device=W.device)
-            for _ in range(10):
-                v = F.normalize(W @ v, dim=0)
-            s = torch.sqrt(((W @ v)**2).sum() / (v**2).sum())
-            W.mul_(self.cfg.spectral_radius / (s + 1e-8))
+            if self.use_sparse:
+                # build a masked dense then convert to sparse CSR
+                Wd = torch.zeros(H, H)
+                mask = (torch.rand_like(Wd) > self.cfg.sparsity)
+                Wd.uniform_(-1.0, 1.0)
+                Wd = Wd * mask
+                # scale to spectral radius via power iteration
+                v = torch.randn(H, 1)
+                for _ in range(10):
+                    v = F.normalize(Wd @ v, dim=0)
+                s = torch.sqrt(((Wd @ v) ** 2).sum() / (v ** 2).sum())
+                Wd.mul_(self.cfg.spectral_radius / (s + 1e-8))
+                # store as sparse (cpu first; it will be moved with the module)
+                W_sparse = Wd.to_sparse_csr()
+                # assign buffers
+                self.W_sparse = W_sparse
+                self._W_dense_tmp = torch.empty(0)
+            else:
+                W = self.W.weight
+                W.zero_()
+                mask = (torch.rand_like(W) > self.cfg.sparsity).float()
+                W.uniform_(-1.0, 1.0)
+                W.mul_(mask)
+                v = torch.randn(H, 1, device=W.device)
+                for _ in range(10):
+                    v = F.normalize(W @ v, dim=0)
+                s = torch.sqrt(((W @ v)**2).sum() / (v**2).sum())
+                W.mul_(self.cfg.spectral_radius / (s + 1e-8))
 
     def forward(self, idx: torch.LongTensor):  # [B,T]
         B, T = idx.shape
@@ -70,7 +97,14 @@ class ESNLanguageModel(nn.Module):
         outs = []
         for t in range(T):
             u = x[:, t, :]
-            pre = self.W_in(u) + self.W(h)
+            # reservoir update: W_in * u + W * h
+            if self.use_sparse:
+                # torch.sparse.mm expects (sparse@dense)
+                # (H,H) @ (H,B) -> (H,B) then transpose to (B,H)
+                Wh = torch.sparse.mm(self.W_sparse.to(h.device), h.T).T
+            else:
+                Wh = self.W(h)
+            pre = self.W_in(u) + Wh
             pre = torch.clamp(pre, -20, 20)
             h_new = torch.tanh(pre)
             h = (1 - self.cfg.leak_rate) * h + self.cfg.leak_rate * h_new
