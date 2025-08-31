@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 from tokenizer import CharTokenizer
 from bpe_tokenizer import BPETokenizer
 from dataset import create_dataloaders

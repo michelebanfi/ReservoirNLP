@@ -101,7 +101,16 @@ class ESNLanguageModel(nn.Module):
             if self.use_sparse:
                 # torch.sparse.mm expects (sparse@dense)
                 # (H,H) @ (H,B) -> (H,B) then transpose to (B,H)
-                Wh = torch.sparse.mm(self.W_sparse.to(h.device), h.T).T
+                # Guard against AMP half precision on cuSPARSE by forcing FP32
+                Wsp = self.W_sparse.to(h.device)
+                h_in = h
+                if torch.is_autocast_enabled():
+                    # compute in fp32 to ensure support
+                    with torch.cuda.amp.autocast(enabled=False):
+                        Wh32 = torch.sparse.mm(Wsp.float(), h_in.T.float()).T
+                    Wh = Wh32.to(dtype=h_in.dtype)
+                else:
+                    Wh = torch.sparse.mm(Wsp, h.T).T
             else:
                 Wh = self.W(h)
             pre = self.W_in(u) + Wh

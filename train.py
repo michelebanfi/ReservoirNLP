@@ -52,7 +52,9 @@ def train(model: ESNLanguageModel, train_loader: DataLoader, val_loader: DataLoa
         model.W_sparse = model.W_sparse.to(device)
     optim = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.startswith('cuda') and torch.cuda.is_available()))
+    # Disable AMP if model uses sparse reservoir due to limited half support in cuSPARSE
+    use_amp = (device.startswith('cuda') and torch.cuda.is_available() and not getattr(model, 'use_sparse', False))
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     step = 0
     history = {"train_loss": [], "val_loss": [], "steps": []}
@@ -67,7 +69,7 @@ def train(model: ESNLanguageModel, train_loader: DataLoader, val_loader: DataLoa
         pbar = tqdm(train_loader, desc=f"Epoch {ep+1}")
         for x, y in pbar:
             x, y = x.to(device), y.to(device)
-            with torch.cuda.amp.autocast(enabled=(device.startswith('cuda') and torch.cuda.is_available())):
+            with torch.cuda.amp.autocast(enabled=use_amp):
                 logits = model(x)
                 B, T, C = logits.shape
                 loss = criterion(logits.view(B*T, C), y.view(B*T))
