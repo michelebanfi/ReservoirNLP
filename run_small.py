@@ -167,9 +167,11 @@ def main():
                 choice = torch.multinomial(probs, num_samples=1)
                 next_id = indices_map.gather(1, choice)
             x = torch.cat([x, next_id], dim=1)
-    out = ''.join(tok.decode(x[0].tolist()))
+    full_ids = x[0].tolist()
+    prompt_len = len(tok.encode(context))
+    continuation = tok.decode(full_ids[prompt_len:])
     print("Sample:")
-    print(out)
+    print(context + continuation)
 
 if __name__ == "__main__":
     main()

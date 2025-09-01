@@ -18,18 +18,21 @@ class BPETokenizer:
             from tokenizers import Tokenizer
             from tokenizers.models import BPE
             from tokenizers.trainers import BpeTrainer
-            from tokenizers.pre_tokenizers import Whitespace
+            from tokenizers.pre_tokenizers import ByteLevel
+            from tokenizers.decoders import ByteLevel as ByteLevelDecoder
         except Exception as e:
             raise RuntimeError(
                 "The `tokenizers` package is required for BPETokenizer. Install with `pip install tokenizers`."
             ) from e
-        return Tokenizer, BPE, BpeTrainer, Whitespace
+        return Tokenizer, BPE, BpeTrainer, ByteLevel, ByteLevelDecoder
 
     @classmethod
     def train_from_texts(cls, texts: List[str], vocab_size: int = 512) -> "BPETokenizer":
-        Tokenizer, BPE, BpeTrainer, Whitespace = cls._require_lib()
+        Tokenizer, BPE, BpeTrainer, ByteLevel, ByteLevelDecoder = cls._require_lib()
         tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
-        tokenizer.pre_tokenizer = Whitespace()
+        # Byte-level pretokenization ensures reversible mapping and proper spacing
+        tokenizer.pre_tokenizer = ByteLevel(add_prefix_space=True)
+        tokenizer.decoder = ByteLevelDecoder()
         trainer = BpeTrainer(vocab_size=vocab_size, special_tokens=["[PAD]", "[UNK]", "[BOS]", "[EOS]"])
         tokenizer.train_from_iterator(texts, trainer)
         return cls(tok=tokenizer)

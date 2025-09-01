@@ -24,7 +24,7 @@ class TrainConfig:
     use_sparse_reservoir: bool = True
 
     # Training
-    epochs: int = 6
+    epochs: int = 2
     lr: float = 3e-4
     weight_decay: float = 5e-3
     label_smoothing: float = 0.05
