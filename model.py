@@ -36,16 +36,44 @@ def build_reservoir_model(cfg: ReservoirConfig):
     # Lazy import to avoid hard dependency at module import time
     from reservoirpy.nodes import Reservoir, Ridge
     from reservoirpy import Model
-    res = Reservoir(
+    # Introspect supported kwargs for cross-version compatibility
+    import inspect
+
+    res_kwargs = dict(
         units=cfg.reservoir_size,
         sr=cfg.spectral_radius,
         lr=cfg.leak_rate,
         input_scaling=cfg.input_scaling,
-        density=cfg.density,
         activation=np.tanh,
-        seed=cfg.seed,
     )
-    readout = Ridge(ridge=cfg.ridge_alpha, out_dim=cfg.output_dim)
+    res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
+    # connectivity argument naming differences
+    if 'density' in res_params:
+        res_kwargs['density'] = cfg.density
+    elif 'connectivity' in res_params:
+        res_kwargs['connectivity'] = cfg.density
+    elif 'proba' in res_params:
+        res_kwargs['proba'] = cfg.density
+    elif 'p' in res_params:
+        res_kwargs['p'] = cfg.density
+    # seed argument naming differences
+    if cfg.seed is not None:
+        if 'seed' in res_params:
+            res_kwargs['seed'] = cfg.seed
+        elif 'random_state' in res_params:
+            res_kwargs['random_state'] = cfg.seed
+    res = Reservoir(**res_kwargs)
+
+    # Ridge readout argument naming differences
+    ridge_params = set(inspect.signature(Ridge.__init__).parameters.keys())
+    rdg_kwargs = dict(ridge=cfg.ridge_alpha)
+    if 'out_dim' in ridge_params:
+        rdg_kwargs['out_dim'] = cfg.output_dim
+    elif 'outdim' in ridge_params:
+        rdg_kwargs['outdim'] = cfg.output_dim
+    elif 'output_dim' in ridge_params:
+        rdg_kwargs['output_dim'] = cfg.output_dim
+    readout = Ridge(**rdg_kwargs)
     model = res >> readout
     return model
 

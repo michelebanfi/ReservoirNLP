@@ -134,37 +134,58 @@ def main():
     # Run context to set reservoir state
     _ = model.run(np.stack(seq, axis=0))
     # Generate next tokens
+    def softmax_stable(logits: np.ndarray, temperature: float) -> np.ndarray:
+        t = max(1e-6, float(temperature))
+        z = logits / t
+        z = z - np.max(z)
+        e = np.exp(z)
+        s = e.sum()
+        if not np.isfinite(s) or s <= 0:
+            return np.full_like(logits, 1.0 / logits.size)
+        return e / s
+
     last_vec = seq[-1]
     for _ in range(100):
         out = model.step(last_vec)
-        probs = out.astype(np.float64)
-        probs = probs / max(1e-12, probs.sum())
-        # temperature + nucleus sampling (approximate)
-        logits = np.log(probs + 1e-12) / max(1e-6, cfg.temperature)
-        p = np.exp(logits)
-        p = p / p.sum()
+        logits = out.astype(np.float64)
+        p = softmax_stable(logits, cfg.temperature)
         # top-k
-        if cfg.top_k > 0:
-            k = min(cfg.top_k, V)
+        if cfg.top_k and cfg.top_k > 0:
+            k = int(min(cfg.top_k, V))
             top_idx = np.argpartition(p, -k)[-k:]
             mask = np.ones_like(p, dtype=bool)
             mask[top_idx] = False
-            p[mask] = 0
-            p = p / p.sum()
+            p[mask] = 0.0
+            s = p.sum()
+            if s <= 0 or not np.isfinite(s):
+                p = np.zeros_like(p)
+                p[top_idx] = 1.0 / len(top_idx)
+            else:
+                p = p / s
         # top-p
-        if cfg.top_p and 0 < cfg.top_p < 1.0:
+        if cfg.top_p and 0.0 < float(cfg.top_p) < 1.0:
             idx_sorted = np.argsort(p)[::-1]
-            cumsum = np.cumsum(p[idx_sorted])
-            keep = cumsum <= cfg.top_p
-            if not np.any(keep):
-                keep[0] = True
+            p_sorted = p[idx_sorted]
+            cumsum = np.cumsum(p_sorted)
+            # keep at least one token
+            cutoff = np.searchsorted(cumsum, float(cfg.top_p), side='right') + 1
+            cutoff = max(1, min(cutoff, V))
+            keep_idx = idx_sorted[:cutoff]
             mask = np.ones_like(p, dtype=bool)
-            mask[idx_sorted[keep]] = False
-            p[mask] = 0
-            p = p / p.sum()
-    next_id = int(np.random.choice(V, p=p))
-    generated.append(next_id)
-    last_vec = E[next_id]
+            mask[keep_idx] = False
+            p[mask] = 0.0
+            s = p.sum()
+            if s <= 0 or not np.isfinite(s):
+                p = np.zeros_like(p)
+                p[keep_idx] = 1.0 / len(keep_idx)
+            else:
+                p = p / s
+        # Final sanitize
+        if not np.all(np.isfinite(p)) or p.sum() <= 0:
+            p = np.full(V, 1.0 / V)
+        next_id = int(np.random.choice(V, p=p))
+        generated.append(next_id)
+        last_vec = E[next_id]
     continuation = tok.decode(generated)
     print("Sample:")
     print(context + continuation)
