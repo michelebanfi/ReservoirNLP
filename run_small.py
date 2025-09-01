@@ -6,8 +6,8 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 from tokenizer import CharTokenizer
 from bpe_tokenizer import BPETokenizer
 from dataset import create_dataloaders
-from model import ESNConfig, build_reservoirpy_esn
-from train import train, evaluate
+from model import ReservoirConfig, build_reservoir_model, make_random_embeddings
+from train import fit_offline, evaluate_mse
 from config import TrainConfig
 
 
@@ -94,27 +94,31 @@ def main():
         batch_size = max(8, len(ids) // max(1, block_size))
     train_loader, val_loader = create_dataloaders(ids, block_size=block_size, batch_size=batch_size)
 
-    # 3) Model
-    cfg_model = ESNConfig(
-        input_size=tok.vocab_size,
-        hidden_size=cfg.hidden_size,
+    # 3) Model (ReservoirPy)
+    # Use compact embeddings to reduce memory on Kaggle
+    embed_dim = min(128, max(16, cfg.readout_dim // 2))
+    embeddings = make_random_embeddings(tok.vocab_size, embed_dim)
+    density = max(0.01, 1.0 - float(cfg.sparsity))
+    cfg_model = ReservoirConfig(
+        input_dim=embed_dim,
+        output_dim=tok.vocab_size,
+        reservoir_size=cfg.hidden_size,
         spectral_radius=cfg.spectral_radius,
-        sparsity=cfg.sparsity,
+        density=density,
         leak_rate=cfg.leak_rate,
-        readout_dim=cfg.readout_dim,
-        ridge=1e-5,
+        input_scaling=1.0,
+        ridge_alpha=1e-5,
+        seed=42,
     )
-    model = build_reservoirpy_esn(vocab_size=tok.vocab_size, cfg=cfg_model)
+    model = build_reservoir_model(cfg_model)
 
     # 4) Train
     os.makedirs('models', exist_ok=True)
-    ckpt = cfg.ckpt_path
-    history = train(
-        model, train_loader, val_loader, vocab_size=tok.vocab_size,
-        epochs=cfg.epochs, warmup=0, eval_batches=cfg.eval_batches,
-    )
-    # Final quick eval
-    final_val = evaluate(model, val_loader, vocab_size=tok.vocab_size, max_batches=cfg.eval_batches)
+    ckpt = cfg.ckpt_path  # kept for compatibility, saving not implemented with reservoirpy here
+    # Offline fit in small chunks for memory safety
+    fit_offline(model, train_loader, embeddings, max_batches=64)
+    # Final quick eval (MSE on one-hot targets)
+    final_val = evaluate_mse(model, val_loader, embeddings, max_batches=cfg.eval_batches)
     print("Training done. Last metrics:", {
         "val_mse": final_val,
     })
@@ -124,8 +128,8 @@ def main():
     context = "Who are you Alice?"
     ids_ctx = tok.encode(context)
     V = tok.vocab_size
-    eye = np.eye(V, dtype=np.float32)
-    seq = [eye[i] for i in ids_ctx]  # list of (V,) arrays
+    E = embeddings
+    seq = [E[i] for i in ids_ctx]  # list of (D,) arrays
     generated: list[int] = []
     # Run context to set reservoir state
     _ = model.run(np.stack(seq, axis=0))
@@ -158,9 +162,9 @@ def main():
             mask[idx_sorted[keep]] = False
             p[mask] = 0
             p = p / p.sum()
-        next_id = int(np.random.choice(V, p=p))
-        generated.append(next_id)
-        last_vec = eye[next_id]
+    next_id = int(np.random.choice(V, p=p))
+    generated.append(next_id)
+    last_vec = E[next_id]
     continuation = tok.decode(generated)
     print("Sample:")
     print(context + continuation)

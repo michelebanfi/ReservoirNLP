@@ -1,66 +1,92 @@
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 import numpy as np
-from typing import Iterable, Tuple
+
+# Training with reservoirpy uses NumPy arrays. We precompute embeddings and
+# convert PyTorch dataset batches to NumPy on the fly to minimize memory.
 
 
-def _batch_to_onehot_lists(batch_x, batch_y, vocab_size: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    """Convert a batch of token ids [B,T] to lists of one-hot sequences [(T,V)]."""
-    # Accept torch.Tensor or numpy arrays
-    x_np = batch_x.detach().cpu().numpy() if hasattr(batch_x, "detach") else np.asarray(batch_x)
-    y_np = batch_y.detach().cpu().numpy() if hasattr(batch_y, "detach") else np.asarray(batch_y)
+def batch_to_embeddings(
+    x_batch: Any,
+    y_batch: Any,
+    embeddings: np.ndarray,
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """Convert integer token batches (B,T) to lists of NumPy sequences.
+
+    - Input sequence X_t: embedding vectors for tokens x[0..T-2]
+    - Target sequence Y_t: next-token one-hot vectors for tokens x[1..T-1]
+    Returns lists with length B. Each element is 2D array (T-1, D) and (T-1, V).
+    """
+    # Accept NumPy arrays directly (preferred) or Torch tensors (convert lazily)
+    if hasattr(x_batch, "cpu") and hasattr(x_batch, "numpy"):
+        x_np = x_batch.cpu().numpy()
+    else:
+        x_np = np.asarray(x_batch)
+    if hasattr(y_batch, "cpu") and hasattr(y_batch, "numpy"):
+        y_np = y_batch.cpu().numpy()
+    else:
+        y_np = np.asarray(y_batch)
+
+    assert x_np.ndim == 2 and y_np.ndim == 2
     B, T = x_np.shape
-    eye = np.eye(vocab_size, dtype=np.float32)
-    X_list, Y_list = [], []
+    D = embeddings.shape[1]
+    V = embeddings.shape[0]
+    X_list: List[np.ndarray] = []
+    Y_list: List[np.ndarray] = []
+    eye = np.identity(V, dtype=np.float32)
     for b in range(B):
-        X_list.append(eye[x_np[b]])  # (T,V)
-        Y_list.append(eye[y_np[b]])  # (T,V)
+        # Use T-1 pairs
+        xt = x_np[b, :-1]
+        yt = y_np[b, :-1]
+        X = embeddings[xt]  # (T-1, D)
+    # One-hot targets via advanced indexing
+    Y = eye[yt]  # (T-1, V)
+    X_list.append(X.astype(np.float32))
+    Y_list.append(Y.astype(np.float32))
     return X_list, Y_list
 
 
-def _dataset_to_lists(loader: Iterable[Tuple[np.ndarray, np.ndarray]], vocab_size: int, max_batches: int | None = None) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+def fit_offline(model, train_loader, embeddings: np.ndarray, max_batches: int | None = None) -> Dict:
+    """Offline training with model.fit on a subset of batches.
+
+    To limit memory usage on Kaggle, we fit incrementally by concatenating batches
+    in small chunks rather than loading all sequences at once.
+    """
+    history: Dict[str, float] = {}
     X_all: List[np.ndarray] = []
     Y_all: List[np.ndarray] = []
-    for i, (xb, yb) in enumerate(loader):
-        Xb, Yb = _batch_to_onehot_lists(xb, yb, vocab_size)
+    seen = 0
+    for i, (x, y) in enumerate(train_loader):
+        Xb, Yb = batch_to_embeddings(x, y, embeddings)
         X_all.extend(Xb)
         Y_all.extend(Yb)
-        if max_batches is not None and (i + 1) >= max_batches:
+        seen += 1
+        # Periodically fit to avoid holding too much in memory
+        if seen % 8 == 0:
+            model.fit(X_all, Y_all)
+            X_all.clear(); Y_all.clear()
+        if max_batches is not None and i + 1 >= max_batches:
             break
-    return X_all, Y_all
-
-
-def train(model, train_loader: Iterable[Tuple[np.ndarray, np.ndarray]], val_loader: Iterable[Tuple[np.ndarray, np.ndarray]], vocab_size: int,
-          epochs: int = 1, warmup: int = 0, eval_batches: int = 10) -> Dict:
-    """Offline training using ReservoirPy's fit().
-
-    - model: ReservoirPy node/model supporting fit and run
-    - train_loader/val_loader: yield batches of token ids [B,T]
-    - vocab_size: size of one-hot vectors
-    """
-    history = {"train_mse": [], "val_mse": []}
-    for ep in range(epochs):
-        X_train, Y_train = _dataset_to_lists(train_loader, vocab_size)
-        model.fit(X_train, Y_train, warmup=warmup)
-        # quick eval on a subset
-        val = evaluate(model, val_loader, vocab_size, max_batches=eval_batches)
-        history["val_mse"].append(val)
-        history["train_mse"].append(float('nan'))
+    if X_all:
+        model.fit(X_all, Y_all)
+        X_all.clear(); Y_all.clear()
     return history
 
 
-def evaluate(model, loader: Iterable[Tuple[np.ndarray, np.ndarray]], vocab_size: int, max_batches: int | None = 10) -> float:
-    X_val, Y_val = _dataset_to_lists(loader, vocab_size, max_batches=max_batches)
-    Y_pred = model.run(X_val)
-    # model.run returns a list of arrays aligned with X_val
-    se = 0.0
-    count = 0
-    for yt, yp in zip(Y_val, Y_pred):
-        # ensure same length in case of warmup effects
-        T = min(len(yt), len(yp))
-        if T == 0:
-            continue
-        diff = yt[-T:] - yp[-T:]
-        se += float(np.mean(diff * diff))
-        count += 1
-    return se / max(1, count)
+def _mse(a: np.ndarray, b: np.ndarray) -> float:
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
+    return float(np.mean((a - b) ** 2))
+
+
+def evaluate_mse(model, val_loader, embeddings: np.ndarray, max_batches: int = 10) -> float:
+    losses: List[float] = []
+    for i, (x, y) in enumerate(val_loader):
+        Xb, Yb = batch_to_embeddings(x, y, embeddings)
+        # Compute predictions and accumulate MSE per sequence
+        for X_seq, Y_seq in zip(Xb, Yb):
+            Y_pred = model.run(X_seq)
+            losses.append(_mse(Y_seq, Y_pred))
+        if i + 1 >= max_batches:
+            break
+    return float(np.mean(losses) if losses else 0.0)
