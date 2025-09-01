@@ -1,13 +1,12 @@
 from __future__ import annotations
 import os
 import numpy as np
-import torch
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 from tokenizer import CharTokenizer
 from bpe_tokenizer import BPETokenizer
 from dataset import create_dataloaders
-from model import ESNLanguageModel, ESNConfig
+from model import ESNConfig, build_reservoirpy_esn
 from train import train, evaluate
 from config import TrainConfig
 
@@ -61,8 +60,6 @@ def build_tiny_corpus(data_path: str | None = None):
 
 def main():
     cfg = TrainConfig()
-    device = cfg.device or ('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
 
     # 1) Build tokenizer from tiny corpus
     full_text = build_tiny_corpus(cfg.data_path)
@@ -105,71 +102,66 @@ def main():
         sparsity=cfg.sparsity,
         leak_rate=cfg.leak_rate,
         readout_dim=cfg.readout_dim,
+        ridge=1e-5,
     )
-    model = ESNLanguageModel(vocab_size=tok.vocab_size, cfg=cfg_model)
-    # set dropout within readout if present
-    if isinstance(model.readout, torch.nn.Sequential) and len(model.readout) >= 3:
-        if isinstance(model.readout[2], torch.nn.Dropout):
-            model.readout[2].p = cfg.dropout
+    model = build_reservoirpy_esn(vocab_size=tok.vocab_size, cfg=cfg_model)
 
     # 4) Train
     os.makedirs('models', exist_ok=True)
     ckpt = cfg.ckpt_path
     history = train(
-        model, train_loader, val_loader, device,
-        epochs=cfg.epochs, lr=cfg.lr, eval_interval=cfg.eval_interval, ckpt_path=ckpt,
-        weight_decay=cfg.weight_decay, label_smoothing=cfg.label_smoothing, patience=cfg.patience,
+        model, train_loader, val_loader, vocab_size=tok.vocab_size,
+        epochs=cfg.epochs, warmup=0, eval_batches=cfg.eval_batches,
     )
     # Final quick eval
-    final_val = evaluate(model, val_loader, device)
+    final_val = evaluate(model, val_loader, vocab_size=tok.vocab_size, max_batches=cfg.eval_batches)
     print("Training done. Last metrics:", {
-        "train_loss": history["train_loss"][-1] if history["train_loss"] else None,
-        "val_loss": final_val,
-        "steps": history["steps"][-1] if history["steps"] else None,
+        "val_mse": final_val,
     })
 
     # 5) Quick sample generation (light sampling)
-    model.eval()
+    # Simple greedy sampling with reservoirpy: keep only last step prediction
     context = "Who are you Alice?"
-    x = torch.tensor([tok.encode(context)], dtype=torch.long, device=device)
-    with torch.no_grad():
-        for _ in range(100):
-            logits = model(x)
-            last = logits[:, -1, :]
-            # temperature + top-k/top-p
-            last = last / max(1e-5, cfg.temperature)
-            # top-k
-            if cfg.top_k > 0:
-                k = min(cfg.top_k, last.size(-1))
-                vals, idxs = torch.topk(last, k=k, dim=-1)
-                logits_filt = vals
-                indices_map = idxs
-            else:
-                logits_filt = last
-                indices_map = torch.arange(last.size(-1), device=last.device).unsqueeze(0)
-            # top-p nucleus on the filtered set
-            if cfg.top_p and 0 < cfg.top_p < 1.0:
-                probs = torch.softmax(logits_filt, dim=-1)
-                sorted_probs, sorted_idx = torch.sort(probs, descending=True, dim=-1)
-                cum = torch.cumsum(sorted_probs, dim=-1)
-                mask = cum > cfg.top_p
-                mask[..., 0] = False
-                keep = ~mask
-                # rebuild a masked distribution
-                filtered = torch.full_like(sorted_probs, float('-inf'))
-                filtered[keep] = torch.log(sorted_probs[keep] + 1e-9)
-                # sample
-                choice_sorted = torch.multinomial(torch.softmax(filtered, dim=-1), num_samples=1)
-                choice = sorted_idx.gather(1, choice_sorted)
-                next_id = indices_map.gather(1, choice)
-            else:
-                probs = torch.softmax(logits_filt, dim=-1)
-                choice = torch.multinomial(probs, num_samples=1)
-                next_id = indices_map.gather(1, choice)
-            x = torch.cat([x, next_id], dim=1)
-    full_ids = x[0].tolist()
-    prompt_len = len(tok.encode(context))
-    continuation = tok.decode(full_ids[prompt_len:])
+    ids_ctx = tok.encode(context)
+    V = tok.vocab_size
+    eye = np.eye(V, dtype=np.float32)
+    seq = [eye[i] for i in ids_ctx]  # list of (V,) arrays
+    generated: list[int] = []
+    # Run context to set reservoir state
+    _ = model.run(np.stack(seq, axis=0))
+    # Generate next tokens
+    last_vec = seq[-1]
+    for _ in range(100):
+        out = model.step(last_vec)
+        probs = out.astype(np.float64)
+        probs = probs / max(1e-12, probs.sum())
+        # temperature + nucleus sampling (approximate)
+        logits = np.log(probs + 1e-12) / max(1e-6, cfg.temperature)
+        p = np.exp(logits)
+        p = p / p.sum()
+        # top-k
+        if cfg.top_k > 0:
+            k = min(cfg.top_k, V)
+            top_idx = np.argpartition(p, -k)[-k:]
+            mask = np.ones_like(p, dtype=bool)
+            mask[top_idx] = False
+            p[mask] = 0
+            p = p / p.sum()
+        # top-p
+        if cfg.top_p and 0 < cfg.top_p < 1.0:
+            idx_sorted = np.argsort(p)[::-1]
+            cumsum = np.cumsum(p[idx_sorted])
+            keep = cumsum <= cfg.top_p
+            if not np.any(keep):
+                keep[0] = True
+            mask = np.ones_like(p, dtype=bool)
+            mask[idx_sorted[keep]] = False
+            p[mask] = 0
+            p = p / p.sum()
+        next_id = int(np.random.choice(V, p=p))
+        generated.append(next_id)
+        last_vec = eye[next_id]
+    continuation = tok.decode(generated)
     print("Sample:")
     print(context + continuation)
 

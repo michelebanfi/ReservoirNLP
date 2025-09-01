@@ -1,0 +1,5 @@
+numpy>=1.23
+torch>=2.0
+reservoirpy>=0.4
+tokenizers>=0.15
+matplotlib>=3.7

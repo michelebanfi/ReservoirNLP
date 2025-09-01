@@ -1,0 +1,74 @@
+To-Do List: Refactor ReservoirNLP with reservoirpy
+Phase 1: Core Refactoring to reservoirpy
+Setup:
+
+Add reservoirpy to the project's dependencies. Make sure it's installed in the environment.
+
+Review the existing config.py and dataset.py to ensure the data loading process remains compatible. The data loaders should produce NumPy arrays, as that's what reservoirpy expects.
+
+Refactor model.py:
+
+Remove the ESNLanguageModel class completely.
+
+Create a new function or class that builds a reservoirpy model.
+
+Define the model architecture using reservoirpy nodes. Start with a simple Echo State Network equivalent:
+
+reservoirpy.nodes.Reservoir for the reservoir part.
+
+reservoirpy.nodes.Ridge for the readout layer.
+
+Connect the nodes to form a reservoirpy.Model. The basic structure will be source >> reservoir >> readout, where source is an input node.
+
+You will not need the manual weight initialization (_init_reservoir) or the manual forward pass logic anymore. reservoirpy handles this internally.
+
+Since the original model had a trainable embedding layer, you will need to handle this. One approach is to pre-compute the embeddings for your input sequences and feed them directly to the reservoirpy model. Alternatively, you can investigate how to integrate a trainable layer, possibly by creating a custom reservoirpy node that wraps torch.nn.Embedding. For simplicity, start with pre-computed embeddings.
+
+Refactor train.py:
+
+Remove the existing train and evaluate functions that use the PyTorch training loop, optimizer, and loss functions.
+
+Implement a new training function that uses the reservoirpy model's fit() method for offline training.
+
+The fit() method will take the training inputs (token embeddings) and corresponding target outputs.
+
+Create a new evaluation function that uses the trained reservoirpy model to make predictions on the validation set and computes the loss (e.g., Mean Squared Error using reservoirpy.observables.mse).
+
+Update run_small.py:
+
+Modify the main script to use the new reservoirpy-based model creation and training functions from the refactored model.py and train.py.
+
+Adjust the data preparation step to provide data in the format expected by the reservoirpy model (sequences of NumPy arrays).
+
+Update the generation/inference loop to use the model.run() method to get predictions.
+
+Phase 2: Experimentation with reservoirpy Features
+Implement Online Learning:
+
+Create a new training script or function that uses the model.train() method instead of model.fit().
+
+Iterate through the training data step-by-step or in small batches, calling model.train() for each chunk. This simulates a streaming data scenario and performs true online learning.
+
+Compare the performance and training speed of the online-trained model against the offline-trained one.
+
+Explore Advanced Architectures:
+
+Deep Reservoir: Modify the model definition in model.py to stack multiple Reservoir nodes (e.g., source >> reservoir1 >> reservoir2 >> readout).
+
+Feedback Connections: Add a feedback loop from the readout node back to the reservoir using reservoirpy.ops.link_feedback(readout, to=reservoir). This is crucial for generative tasks like language modeling.
+
+Parallel Reservoirs: Experiment with having multiple reservoirs in parallel whose outputs are concatenated before being fed to the readout. You can use reservoirpy.nodes.Concat for this.
+
+Investigate Different Node Types:
+
+Go beyond the standard Reservoir and Ridge nodes.
+
+Try alternative readout nodes like reservoirpy.nodes.RLS or reservoirpy.nodes.LMS which are designed for online learning.
+
+Explore other reservoir types if they seem applicable, such as reservoirpy.nodes.NVAR for a simpler, non-linear transformation.
+
+Hyperparameter Optimization:
+
+Look into reservoirpy.hyper for tools to automate the search for optimal hyperparameters (like spectral_radius, leak_rate, input_scaling, etc.).
+
+Set up a hyperparameter search experiment using reservoirpy.hyper.research to find the best configuration for your language modeling task.
