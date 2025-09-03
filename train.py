@@ -14,9 +14,9 @@ def batch_to_embeddings(
     """Convert integer token batches (B,T) to lists of NumPy sequences.
 
     - Input sequence X_t: embedding vectors for tokens x[0..T-2]
-    - Target sequence Y_t: one-hot vectors for tokens x[1..T-1] (reservoirpy expects 2D targets)
-    Returns lists with length B. Each element is 2D array (T-1, D) for inputs
-    and 2D array (T-1, V) for targets (one-hot encoded for reservoirpy compatibility).
+    - Target sequence Y_t: embedding vectors for tokens x[1..T-1] (NOT one-hot!)
+    Returns lists with length B. Each element is 2D array (T-1, D) for both inputs and targets.
+    This approach uses embeddings for both inputs and targets, avoiding large one-hot matrices.
     """
     # Accept NumPy arrays directly (preferred) or Torch tensors (convert lazily)
     if hasattr(x_batch, "cpu") and hasattr(x_batch, "numpy"):
@@ -30,7 +30,6 @@ def batch_to_embeddings(
 
     assert x_np.ndim == 2 and y_np.ndim == 2
     B, T = x_np.shape
-    V = embeddings.shape[0]  # vocab size
     X_list: List[np.ndarray] = []
     Y_list: List[np.ndarray] = []
     
@@ -38,10 +37,8 @@ def batch_to_embeddings(
         # Use T-1 pairs
         xt = x_np[b, :-1]  # input tokens
         yt = y_np[b, :-1]  # target tokens
-        X = embeddings[xt]  # (T-1, D) - embed input tokens
-        
-        # Convert to one-hot for reservoirpy (expects 2D targets)
-        Y = np.eye(V, dtype=np.float32)[yt]  # (T-1, V) - one-hot targets
+        X = embeddings[xt]  # (T-1, D) - embed input tokens  
+        Y = embeddings[yt]  # (T-1, D) - embed target tokens (NOT one-hot!)
         
         X_list.append(X.astype(np.float32))
         Y_list.append(Y.astype(np.float32))
@@ -75,7 +72,51 @@ def fit_offline(model, train_loader, embeddings: np.ndarray, max_batches: int | 
     return history
 
 
-def _sparse_cross_entropy_from_onehot(y_true_onehot: np.ndarray, y_pred_logits: np.ndarray) -> float:
+def compute_vocab_logits(
+    pred_embeddings: np.ndarray,
+    embeddings: np.ndarray,
+    temperature: float = 1.0
+) -> np.ndarray:
+    """Convert predicted embeddings to vocabulary logits via similarity.
+    
+    Args:
+        pred_embeddings: (T, D) predicted embedding vectors
+        embeddings: (V, D) vocabulary embedding matrix  
+        temperature: softmax temperature for calibration
+        
+    Returns:
+        logits: (T, V) unnormalized log probabilities
+    """
+    # Compute similarities: (T, D) @ (D, V) -> (T, V)
+    similarities = pred_embeddings @ embeddings.T  # (T, V)
+    return similarities / temperature
+
+
+def _sparse_cross_entropy_from_embeddings(
+    y_pred_embeddings: np.ndarray,
+    y_true_indices: np.ndarray,
+    embeddings: np.ndarray
+) -> float:
+    """Compute cross-entropy loss between predicted embeddings and target tokens.
+    
+    Args:
+        y_pred_embeddings: (T, D) predicted embedding vectors
+        y_true_indices: (T,) target token indices
+        embeddings: (V, D) vocabulary embeddings for computing logits
+        
+    Returns:
+        Average cross-entropy loss over sequence
+    """
+    # Convert embeddings to logits via similarity
+    logits = compute_vocab_logits(y_pred_embeddings, embeddings)  # (T, V)
+    
+    # Use sparse cross-entropy (more memory efficient than one-hot)
+    T = logits.shape[0]
+    log_probs = logits - np.log(np.sum(np.exp(logits), axis=1, keepdims=True))  # (T, V)
+    
+    # Gather log probabilities for true classes
+    true_log_probs = log_probs[np.arange(T), y_true_indices]  # (T,)
+    return -np.mean(true_log_probs)
     """Compute sparse categorical cross-entropy loss from one-hot targets.
     
     Args:
@@ -133,17 +174,39 @@ def _sparse_accuracy_from_onehot(y_true_onehot: np.ndarray, y_pred_logits: np.nd
 
 
 def evaluate_classification(model, val_loader, embeddings: np.ndarray, max_batches: int = 10) -> Dict[str, float]:
-    """Evaluate model using proper classification metrics (cross-entropy and accuracy)."""
+    """Evaluate model using proper classification metrics (cross-entropy and accuracy).
+    
+    Now works with embedding-to-embedding approach, converting predictions to logits for metrics.
+    """
     losses: List[float] = []
     accuracies: List[float] = []
     
     for i, (x, y) in enumerate(val_loader):
         Xb, Yb = batch_to_embeddings(x, y, embeddings)
         # Compute predictions and accumulate metrics per sequence
-        for X_seq, Y_seq in zip(Xb, Yb):
-            Y_pred = model.run(X_seq)
-            losses.append(_sparse_cross_entropy_from_onehot(Y_seq, Y_pred))
-            accuracies.append(_sparse_accuracy_from_onehot(Y_seq, Y_pred))
+        for X_seq, Y_embed_seq in zip(Xb, Yb):
+            # Get embedding predictions from reservoir
+            Y_pred_embed = model.run(X_seq)  # (T, D)
+            
+            # Convert target embeddings back to token indices for loss computation
+            T = Y_embed_seq.shape[0]
+            y_true_indices = []
+            for t in range(T):
+                # Find which embedding this target corresponds to
+                distances = np.sum((embeddings - Y_embed_seq[t]) ** 2, axis=1)
+                y_true_indices.append(np.argmin(distances))
+            y_true_indices = np.array(y_true_indices)
+            
+            # Compute loss and accuracy using embedding-based approach
+            loss = _sparse_cross_entropy_from_embeddings(Y_pred_embed, y_true_indices, embeddings)
+            
+            # Compute accuracy
+            logits = compute_vocab_logits(Y_pred_embed, embeddings)
+            pred_tokens = np.argmax(logits, axis=1)
+            accuracy = np.mean(pred_tokens == y_true_indices)
+            
+            losses.append(loss)
+            accuracies.append(accuracy)
         if i + 1 >= max_batches:
             break
     

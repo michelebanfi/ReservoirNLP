@@ -96,8 +96,8 @@ def main():
     train_loader, val_loader = create_dataloaders(ids, block_size=block_size, batch_size=batch_size)
 
     # 3) Model (ReservoirPy)
-    # Use compact embeddings to reduce memory on Kaggle
-    embed_dim = min(128, max(16, cfg.readout_dim // 2))
+    # Use configurable embedding dimension
+    embed_dim = cfg.embed_dim
     embeddings = make_random_embeddings(tok.vocab_size, embed_dim)
     density = max(0.01, 1.0 - float(cfg.sparsity))
     cfg_model = ReservoirConfig(
@@ -112,7 +112,7 @@ def main():
         seed=42,
         n_reservoirs=cfg.n_reservoirs,
     )
-    model = build_reservoir_model(cfg_model)
+    model = build_reservoir_model(cfg_model, embeddings)
 
     # 4) Train
     os.makedirs('models', exist_ok=True)
@@ -146,8 +146,12 @@ def main():
 
     last_vec = seq[-1]
     for _ in range(100):
-        out = model.step(last_vec)
-        logits = out.astype(np.float64)
+        # Get embedding prediction from reservoir
+        out_embed = model.step(last_vec)  # (D,) embedding prediction
+        
+        # Convert embedding to vocabulary logits via similarity  
+        similarities = out_embed @ E.T  # (V,) similarities with all embeddings
+        logits = similarities.astype(np.float64)
         p = softmax_stable(logits, cfg.temperature)
         # top-k
         if cfg.top_k and cfg.top_k > 0:

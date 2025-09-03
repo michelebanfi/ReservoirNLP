@@ -20,9 +20,9 @@ class TrainConfig:
     sparsity: float = 0.9
     leak_rate: float = 0.25
     readout_dim: int = 1024
-    dropout: float = 0.5
+    embed_dim: int = 512  # dimension of input/output embeddings
     use_sparse_reservoir: bool = True
-    n_reservoirs: int = 1
+    n_reservoirs: int = 3
 
     # Training
     epochs: int = 2

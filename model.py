@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 import numpy as np
 
 
@@ -29,93 +29,81 @@ class ReservoirConfig:
     n_reservoirs: int = 1
 
 
-def build_reservoir_model(cfg: ReservoirConfig):
-    """Build a simple reservoirpy model: input -> Reservoir -> Ridge.
-
-    Returns a reservoirpy.Model instance ready for fit()/run().
+def build_reservoir_model(
+    config: ReservoirConfig,
+    embeddings: np.ndarray, 
+) -> Any:
+    """Build a reservoirpy model for next-token prediction.
+    
+    Now uses embeddings for both inputs AND targets, with a custom output layer
+    that maps from reservoir states to final vocabulary logits.
     """
-    # Lazy import to avoid hard dependency at module import time
-    from reservoirpy.nodes import Reservoir, Ridge
-    from reservoirpy import Model
-    # Introspect supported kwargs for cross-version compatibility
-    import inspect
+    try:
+        from reservoirpy.nodes import Reservoir, Ridge
+    except ImportError:
+        raise ImportError("Please install reservoirpy: pip install reservoirpy")
 
-    if cfg.n_reservoirs > 1:
-        # Create a chain of reservoirs
-        reservoirs = []
-        for i in range(cfg.n_reservoirs):
-            res_kwargs = dict(
-                units=cfg.reservoir_size,
-                sr=cfg.spectral_radius,
-                lr=cfg.leak_rate,
-                input_scaling=cfg.input_scaling,
-                activation=np.tanh,
-                name=f"res{i+1}"
-            )
-            
-            # Add connectivity parameter with version compatibility
-            res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
-            if 'density' in res_params:
-                res_kwargs['density'] = cfg.density
-            elif 'connectivity' in res_params:
-                res_kwargs['connectivity'] = cfg.density
-            elif 'proba' in res_params:
-                res_kwargs['proba'] = cfg.density
-            elif 'p' in res_params:
-                res_kwargs['p'] = cfg.density
-            
-            # Add seed parameter with version compatibility
-            if cfg.seed is not None:
-                if 'seed' in res_params:
-                    res_kwargs['seed'] = cfg.seed + i  # Different seed for each reservoir
-                elif 'random_state' in res_params:
-                    res_kwargs['random_state'] = cfg.seed + i
-            
-            reservoirs.append(Reservoir(**res_kwargs))
+    embed_dim = embeddings.shape[1]  # D
+    vocab_size = embeddings.shape[0]  # V
+    
+    reservoirs = []
+    prev_output_size = embed_dim
+    
+    # Build reservoir chain
+    for i in range(config.n_reservoirs):
+        # Parameter introspection for cross-version compatibility
+        reservoir_kwargs = {}
+        import inspect
+        reservoir_sig = inspect.signature(Reservoir)
+        reservoir_params = set(reservoir_sig.parameters.keys())
         
-        # Connect reservoirs in a sequence
-        res = reservoirs[0]
-        for i in range(1, len(reservoirs)):
-            res = res >> reservoirs[i]
+        if "units" in reservoir_params:
+            reservoir_kwargs["units"] = config.reservoir_size
+        elif "N" in reservoir_params:
+            reservoir_kwargs["N"] = config.reservoir_size
+            
+        if "lr" in reservoir_params:
+            reservoir_kwargs["lr"] = config.leak_rate
+        elif "leaking_rate" in reservoir_params:
+            reservoir_kwargs["leaking_rate"] = config.leak_rate
+            
+        if "sr" in reservoir_params:
+            reservoir_kwargs["sr"] = config.spectral_radius
+        elif "spectral_radius" in reservoir_params:
+            reservoir_kwargs["spectral_radius"] = config.spectral_radius
+            
+        reservoir_kwargs.update({
+            "input_scaling": config.input_scaling,
+            "seed": config.seed + i
+        })
+        
+        reservoir = Reservoir(**reservoir_kwargs)
+        reservoirs.append(reservoir)
+        prev_output_size = config.reservoir_size
+    
+    # Output layer: Map reservoir states (H_dim) to embedding space (D)
+    # Then we'll compute similarities with embeddings to get vocabulary logits
+    ridge_kwargs = {}
+    ridge_sig = inspect.signature(Ridge)
+    ridge_params = set(ridge_sig.parameters.keys())
+    
+    if "alpha" in ridge_params:
+        ridge_kwargs["alpha"] = config.ridge_alpha
+    elif "ridge" in ridge_params:
+        ridge_kwargs["ridge"] = config.ridge_alpha
+    
+    # Map to embedding space, not directly to vocabulary
+    readout = Ridge(output_dim=embed_dim, **ridge_kwargs)
+    
+    # Chain all components
+    if len(reservoirs) == 1:
+        model = reservoirs[0] >> readout
     else:
-        # Single reservoir
-        res_kwargs = dict(
-            units=cfg.reservoir_size,
-            sr=cfg.spectral_radius,
-            lr=cfg.leak_rate,
-            input_scaling=cfg.input_scaling,
-            activation=np.tanh,
-        )
-        
-        res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
-        # connectivity argument naming differences
-        if 'density' in res_params:
-            res_kwargs['density'] = cfg.density
-        elif 'connectivity' in res_params:
-            res_kwargs['connectivity'] = cfg.density
-        elif 'proba' in res_params:
-            res_kwargs['proba'] = cfg.density
-        elif 'p' in res_params:
-            res_kwargs['p'] = cfg.density
-        # seed argument naming differences
-        if cfg.seed is not None:
-            if 'seed' in res_params:
-                res_kwargs['seed'] = cfg.seed
-            elif 'random_state' in res_params:
-                res_kwargs['random_state'] = cfg.seed
-        res = Reservoir(**res_kwargs)
-
-    # Ridge readout argument naming differences
-    ridge_params = set(inspect.signature(Ridge.__init__).parameters.keys())
-    rdg_kwargs = dict(ridge=cfg.ridge_alpha)
-    if 'out_dim' in ridge_params:
-        rdg_kwargs['out_dim'] = cfg.output_dim
-    elif 'outdim' in ridge_params:
-        rdg_kwargs['outdim'] = cfg.output_dim
-    elif 'output_dim' in ridge_params:
-        rdg_kwargs['output_dim'] = cfg.output_dim
-    readout = Ridge(**rdg_kwargs)
-    model = res >> readout
+        chain = reservoirs[0]
+        for reservoir in reservoirs[1:]:
+            chain = chain >> reservoir
+        model = chain >> readout
+    
     return model
 
 
