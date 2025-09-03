@@ -21,6 +21,10 @@ class TrainConfig:
     leak_rate: float = 0.25
     readout_dim: int = 1024
     embed_dim: int = 512  # dimension of input/output embeddings
+    use_positional_encoding: bool = True  # add positional encoding to embeddings
+    pos_encoding_type: str = "sinusoidal"  # "sinusoidal", "learned", or "none"
+    pos_encoding_scale: float = 0.1  # scaling factor for positional encoding
+    max_sequence_length: int = 2048  # maximum sequence length for positional encoding
     use_sparse_reservoir: bool = True
     n_reservoirs: int = 3
 

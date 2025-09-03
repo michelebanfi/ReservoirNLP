@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 import numpy as np
 
 # Training with reservoirpy uses NumPy arrays. We precompute embeddings and
@@ -10,10 +10,12 @@ def batch_to_embeddings(
     x_batch: Any,
     y_batch: Any,
     embeddings: np.ndarray,
+    pos_encoding: Optional[np.ndarray] = None,
+    pos_scale: float = 0.1,
 ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    """Convert integer token batches (B,T) to lists of NumPy sequences.
+    """Convert integer token batches (B,T) to lists of NumPy sequences with optional positional encoding.
 
-    - Input sequence X_t: embedding vectors for tokens x[0..T-2]
+    - Input sequence X_t: embedding vectors for tokens x[0..T-2] + positional encoding
     - Target sequence Y_t: embedding vectors for tokens x[1..T-1] (NOT one-hot!)
     Returns lists with length B. Each element is 2D array (T-1, D) for both inputs and targets.
     This approach uses embeddings for both inputs and targets, avoiding large one-hot matrices.
@@ -40,23 +42,29 @@ def batch_to_embeddings(
         X = embeddings[xt]  # (T-1, D) - embed input tokens  
         Y = embeddings[yt]  # (T-1, D) - embed target tokens (NOT one-hot!)
         
+        # Apply positional encoding to inputs if provided
+        if pos_encoding is not None:
+            from model import apply_positional_encoding
+            X = apply_positional_encoding(X, pos_encoding, scale_factor=pos_scale)
+        
         X_list.append(X.astype(np.float32))
         Y_list.append(Y.astype(np.float32))
     return X_list, Y_list
 
 
-def fit_offline(model, train_loader, embeddings: np.ndarray, max_batches: int | None = None) -> Dict:
+def fit_offline(model, train_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int | None = None) -> Dict:
     """Offline training with model.fit on a subset of batches.
 
     To limit memory usage on Kaggle, we fit incrementally by concatenating batches
     in small chunks rather than loading all sequences at once.
+    Now includes optional positional encoding support.
     """
     history: Dict[str, float] = {}
     X_all: List[np.ndarray] = []
     Y_all: List[np.ndarray] = []
     seen = 0
     for i, (x, y) in enumerate(train_loader):
-        Xb, Yb = batch_to_embeddings(x, y, embeddings)
+        Xb, Yb = batch_to_embeddings(x, y, embeddings, pos_encoding, pos_scale)
         X_all.extend(Xb)
         Y_all.extend(Yb)
         seen += 1
@@ -173,16 +181,17 @@ def _sparse_accuracy_from_onehot(y_true_onehot: np.ndarray, y_pred_logits: np.nd
     return float(np.mean(pred_classes == y_true_indices))
 
 
-def evaluate_classification(model, val_loader, embeddings: np.ndarray, max_batches: int = 10) -> Dict[str, float]:
+def evaluate_classification(model, val_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int = 10) -> Dict[str, float]:
     """Evaluate model using proper classification metrics (cross-entropy and accuracy).
     
     Now works with embedding-to-embedding approach, converting predictions to logits for metrics.
+    Includes optional positional encoding support.
     """
     losses: List[float] = []
     accuracies: List[float] = []
     
     for i, (x, y) in enumerate(val_loader):
-        Xb, Yb = batch_to_embeddings(x, y, embeddings)
+        Xb, Yb = batch_to_embeddings(x, y, embeddings, pos_encoding, pos_scale)
         # Compute predictions and accumulate metrics per sequence
         for X_seq, Y_embed_seq in zip(Xb, Yb):
             # Get embedding predictions from reservoir

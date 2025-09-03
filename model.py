@@ -4,6 +4,85 @@ from typing import Optional, Any
 import numpy as np
 
 
+def create_sinusoidal_positional_encoding(
+    max_len: int, 
+    embed_dim: int
+) -> np.ndarray:
+    """Create sinusoidal positional encoding matrix.
+    
+    Args:
+        max_len: Maximum sequence length
+        embed_dim: Embedding dimension
+        
+    Returns:
+        pos_encoding: (max_len, embed_dim) positional encoding matrix
+    """
+    pos_encoding = np.zeros((max_len, embed_dim), dtype=np.float32)
+    
+    position = np.arange(0, max_len, dtype=np.float32).reshape(-1, 1)
+    div_term = np.exp(np.arange(0, embed_dim, 2, dtype=np.float32) * 
+                     -(np.log(10000.0) / embed_dim))
+    
+    pos_encoding[:, 0::2] = np.sin(position * div_term)
+    if embed_dim > 1:
+        pos_encoding[:, 1::2] = np.cos(position * div_term[:pos_encoding[:, 1::2].shape[1]])
+    
+    return pos_encoding
+
+
+def create_learned_positional_encoding(
+    max_len: int, 
+    embed_dim: int,
+    seed: Optional[int] = None
+) -> np.ndarray:
+    """Create learned (random) positional encoding matrix.
+    
+    Args:
+        max_len: Maximum sequence length
+        embed_dim: Embedding dimension
+        seed: Random seed for reproducibility
+        
+    Returns:
+        pos_encoding: (max_len, embed_dim) positional encoding matrix
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # Initialize with small random values (similar to transformer practice)
+    pos_encoding = np.random.normal(0, 0.02, (max_len, embed_dim)).astype(np.float32)
+    return pos_encoding
+
+
+def apply_positional_encoding(
+    embeddings: np.ndarray,
+    pos_encoding: np.ndarray,
+    positions: Optional[np.ndarray] = None,
+    scale_factor: float = 0.1
+) -> np.ndarray:
+    """Apply positional encoding to embeddings.
+    
+    Args:
+        embeddings: (seq_len, embed_dim) token embeddings
+        pos_encoding: (max_len, embed_dim) positional encoding matrix
+        positions: (seq_len,) position indices. If None, use 0, 1, 2, ...
+        scale_factor: scaling factor for positional encoding (to avoid overwhelming embeddings)
+        
+    Returns:
+        encoded_embeddings: (seq_len, embed_dim) embeddings + scaled positional encoding
+    """
+    seq_len, embed_dim = embeddings.shape
+    
+    if positions is None:
+        positions = np.arange(seq_len)
+    
+    # Ensure positions are within bounds
+    positions = np.clip(positions, 0, pos_encoding.shape[0] - 1)
+    
+    # Add scaled positional encoding
+    pos_emb = pos_encoding[positions] * scale_factor  # (seq_len, embed_dim)
+    return embeddings + pos_emb
+
+
 @dataclass
 class ReservoirConfig:
     """Configuration for a reservoirpy ESN-like model.
@@ -16,6 +95,9 @@ class ReservoirConfig:
     - leak_rate: leaky integration rate
     - input_scaling: scaling for inputs
     - ridge_alpha: ridge regularization strength for readout
+    - use_positional_encoding: whether to add positional encoding
+    - pos_encoding_type: type of positional encoding ("sinusoidal", "learned", "none")
+    - max_sequence_length: maximum sequence length for positional encoding
     """
     input_dim: int
     output_dim: int
@@ -27,16 +109,25 @@ class ReservoirConfig:
     ridge_alpha: float = 1e-6
     seed: Optional[int] = 42
     n_reservoirs: int = 1
+    use_positional_encoding: bool = True
+    pos_encoding_type: str = "sinusoidal"  # "sinusoidal", "learned", "none"
+    pos_encoding_scale: float = 0.1  # scaling factor for positional encoding
+    max_sequence_length: int = 2048
 
 
 def build_reservoir_model(
     config: ReservoirConfig,
     embeddings: np.ndarray, 
-) -> Any:
-    """Build a reservoirpy model for next-token prediction.
+) -> tuple[Any, Optional[np.ndarray]]:
+    """Build a reservoirpy model for next-token prediction with optional positional encoding.
     
-    Now uses embeddings for both inputs AND targets, with a custom output layer
-    that maps from reservoir states to final vocabulary logits.
+    Args:
+        config: Model configuration
+        embeddings: Fixed embedding matrix (V, D)
+        
+    Returns:
+        model: reservoirpy model (Reservoir >> Ridge) 
+        pos_encoding: positional encoding matrix (max_len, D) or None if disabled
     """
     try:
         from reservoirpy.nodes import Reservoir, Ridge
@@ -45,6 +136,20 @@ def build_reservoir_model(
 
     embed_dim = embeddings.shape[1]  # D
     vocab_size = embeddings.shape[0]  # V
+    
+    # Create positional encoding if enabled
+    pos_encoding = None
+    if config.use_positional_encoding and config.pos_encoding_type != "none":
+        if config.pos_encoding_type == "sinusoidal":
+            pos_encoding = create_sinusoidal_positional_encoding(
+                config.max_sequence_length, embed_dim
+            )
+        elif config.pos_encoding_type == "learned":
+            pos_encoding = create_learned_positional_encoding(
+                config.max_sequence_length, embed_dim, config.seed
+            )
+        else:
+            raise ValueError(f"Unknown positional encoding type: {config.pos_encoding_type}")
     
     reservoirs = []
     prev_output_size = embed_dim
@@ -104,7 +209,7 @@ def build_reservoir_model(
             chain = chain >> reservoir
         model = chain >> readout
     
-    return model
+    return model, pos_encoding
 
 
 def make_random_embeddings(vocab_size: int, embed_dim: int, seed: int = 42) -> np.ndarray:

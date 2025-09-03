@@ -111,16 +111,20 @@ def main():
         ridge_alpha=1e-5,
         seed=42,
         n_reservoirs=cfg.n_reservoirs,
+        use_positional_encoding=cfg.use_positional_encoding,
+        pos_encoding_type=cfg.pos_encoding_type,
+        pos_encoding_scale=cfg.pos_encoding_scale,
+        max_sequence_length=cfg.max_sequence_length,
     )
-    model = build_reservoir_model(cfg_model, embeddings)
+    model, pos_encoding = build_reservoir_model(cfg_model, embeddings)
 
     # 4) Train
     os.makedirs('models', exist_ok=True)
     ckpt = cfg.ckpt_path  # kept for compatibility, saving not implemented with reservoirpy here
     # Offline fit in small chunks for memory safety
-    fit_offline(model, train_loader, embeddings, max_batches=64)
+    fit_offline(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64)
     # Final evaluation using proper classification metrics
-    final_metrics = evaluate_classification(model, val_loader, embeddings, max_batches=cfg.eval_batches)
+    final_metrics = evaluate_classification(model, val_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=cfg.eval_batches)
     print("Training done. Evaluation metrics:", final_metrics)
 
     # 5) Quick sample generation (light sampling)
@@ -130,6 +134,14 @@ def main():
     V = tok.vocab_size
     E = embeddings
     seq = [E[i] for i in ids_ctx]  # list of (D,) arrays
+    
+    # Apply positional encoding to context if enabled
+    if pos_encoding is not None:
+        from model import apply_positional_encoding
+        context_emb = np.stack(seq, axis=0)  # (ctx_len, D)
+        context_emb_pos = apply_positional_encoding(context_emb, pos_encoding, scale_factor=cfg.pos_encoding_scale)
+        seq = [context_emb_pos[i] for i in range(len(seq))]  # back to list
+    
     generated: list[int] = []
     # Run context to set reservoir state
     _ = model.run(np.stack(seq, axis=0))
@@ -145,6 +157,7 @@ def main():
         return e / s
 
     last_vec = seq[-1]
+    current_pos = len(ids_ctx)  # position for next token
     for _ in range(100):
         # Get embedding prediction from reservoir
         out_embed = model.step(last_vec)  # (D,) embedding prediction
@@ -189,7 +202,14 @@ def main():
             p = np.full(V, 1.0 / V)
         next_id = int(np.random.choice(V, p=p))
         generated.append(next_id)
-        last_vec = E[next_id]
+        
+        # Prepare next input with positional encoding if enabled
+        next_emb = E[next_id]
+        if pos_encoding is not None and current_pos < pos_encoding.shape[0]:
+            next_emb = next_emb + pos_encoding[current_pos] * cfg.pos_encoding_scale
+        
+        last_vec = next_emb
+        current_pos += 1
     continuation = tok.decode(generated)
     print("Sample:")
     print(context + continuation)
