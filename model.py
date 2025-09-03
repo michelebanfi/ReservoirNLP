@@ -40,54 +40,70 @@ def build_reservoir_model(cfg: ReservoirConfig):
     # Introspect supported kwargs for cross-version compatibility
     import inspect
 
-    res_kwargs = dict(
-        units=cfg.reservoir_size,
-        sr=cfg.spectral_radius,
-        lr=cfg.leak_rate,
-        input_scaling=cfg.input_scaling,
-        activation=np.tanh,
-    )
     if cfg.n_reservoirs > 1:
         # Create a chain of reservoirs
-        reservoirs = [Reservoir(
-            units=cfg.reservoir_size,
-            sr=cfg.spectral_radius,
-            lr=cfg.leak_rate,
-            input_scaling=cfg.input_scaling,
-            activation=np.tanh,
-            name=f"res{i+1}"
-        ) for i in range(cfg.n_reservoirs)]
+        reservoirs = []
+        for i in range(cfg.n_reservoirs):
+            res_kwargs = dict(
+                units=cfg.reservoir_size,
+                sr=cfg.spectral_radius,
+                lr=cfg.leak_rate,
+                input_scaling=cfg.input_scaling,
+                activation=np.tanh,
+                name=f"res{i+1}"
+            )
+            
+            # Add connectivity parameter with version compatibility
+            res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
+            if 'density' in res_params:
+                res_kwargs['density'] = cfg.density
+            elif 'connectivity' in res_params:
+                res_kwargs['connectivity'] = cfg.density
+            elif 'proba' in res_params:
+                res_kwargs['proba'] = cfg.density
+            elif 'p' in res_params:
+                res_kwargs['p'] = cfg.density
+            
+            # Add seed parameter with version compatibility
+            if cfg.seed is not None:
+                if 'seed' in res_params:
+                    res_kwargs['seed'] = cfg.seed + i  # Different seed for each reservoir
+                elif 'random_state' in res_params:
+                    res_kwargs['random_state'] = cfg.seed + i
+            
+            reservoirs.append(Reservoir(**res_kwargs))
         
         # Connect reservoirs in a sequence
         res = reservoirs[0]
         for i in range(1, len(reservoirs)):
             res = res >> reservoirs[i]
     else:
-        res = Reservoir(
+        # Single reservoir
+        res_kwargs = dict(
             units=cfg.reservoir_size,
             sr=cfg.spectral_radius,
             lr=cfg.leak_rate,
             input_scaling=cfg.input_scaling,
             activation=np.tanh,
         )
-
-    res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
-    # connectivity argument naming differences
-    if 'density' in res_params:
-        res_kwargs['density'] = cfg.density
-    elif 'connectivity' in res_params:
-        res_kwargs['connectivity'] = cfg.density
-    elif 'proba' in res_params:
-        res_kwargs['proba'] = cfg.density
-    elif 'p' in res_params:
-        res_kwargs['p'] = cfg.density
-    # seed argument naming differences
-    if cfg.seed is not None:
-        if 'seed' in res_params:
-            res_kwargs['seed'] = cfg.seed
-        elif 'random_state' in res_params:
-            res_kwargs['random_state'] = cfg.seed
-    res = Reservoir(**res_kwargs)
+        
+        res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
+        # connectivity argument naming differences
+        if 'density' in res_params:
+            res_kwargs['density'] = cfg.density
+        elif 'connectivity' in res_params:
+            res_kwargs['connectivity'] = cfg.density
+        elif 'proba' in res_params:
+            res_kwargs['proba'] = cfg.density
+        elif 'p' in res_params:
+            res_kwargs['p'] = cfg.density
+        # seed argument naming differences
+        if cfg.seed is not None:
+            if 'seed' in res_params:
+                res_kwargs['seed'] = cfg.seed
+            elif 'random_state' in res_params:
+                res_kwargs['random_state'] = cfg.seed
+        res = Reservoir(**res_kwargs)
 
     # Ridge readout argument naming differences
     ridge_params = set(inspect.signature(Ridge.__init__).parameters.keys())

@@ -14,8 +14,9 @@ def batch_to_embeddings(
     """Convert integer token batches (B,T) to lists of NumPy sequences.
 
     - Input sequence X_t: embedding vectors for tokens x[0..T-2]
-    - Target sequence Y_t: next-token one-hot vectors for tokens x[1..T-1]
-    Returns lists with length B. Each element is 2D array (T-1, D) and (T-1, V).
+    - Target sequence Y_t: one-hot vectors for tokens x[1..T-1] (reservoirpy expects 2D targets)
+    Returns lists with length B. Each element is 2D array (T-1, D) for inputs
+    and 2D array (T-1, V) for targets (one-hot encoded for reservoirpy compatibility).
     """
     # Accept NumPy arrays directly (preferred) or Torch tensors (convert lazily)
     if hasattr(x_batch, "cpu") and hasattr(x_batch, "numpy"):
@@ -29,18 +30,19 @@ def batch_to_embeddings(
 
     assert x_np.ndim == 2 and y_np.ndim == 2
     B, T = x_np.shape
-    D = embeddings.shape[1]
-    V = embeddings.shape[0]
+    V = embeddings.shape[0]  # vocab size
     X_list: List[np.ndarray] = []
     Y_list: List[np.ndarray] = []
-    eye = np.identity(V, dtype=np.float32)
+    
     for b in range(B):
         # Use T-1 pairs
-        xt = x_np[b, :-1]
-        yt = y_np[b, :-1]
-        X = embeddings[xt]  # (T-1, D)
-        # One-hot targets via advanced indexing
-        Y = eye[yt]  # (T-1, V)
+        xt = x_np[b, :-1]  # input tokens
+        yt = y_np[b, :-1]  # target tokens
+        X = embeddings[xt]  # (T-1, D) - embed input tokens
+        
+        # Convert to one-hot for reservoirpy (expects 2D targets)
+        Y = np.eye(V, dtype=np.float32)[yt]  # (T-1, V) - one-hot targets
+        
         X_list.append(X.astype(np.float32))
         Y_list.append(Y.astype(np.float32))
     return X_list, Y_list
@@ -73,48 +75,61 @@ def fit_offline(model, train_loader, embeddings: np.ndarray, max_batches: int | 
     return history
 
 
-def _cross_entropy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Compute categorical cross-entropy loss between one-hot targets and predictions.
+def _sparse_cross_entropy_from_onehot(y_true_onehot: np.ndarray, y_pred_logits: np.ndarray) -> float:
+    """Compute sparse categorical cross-entropy loss from one-hot targets.
     
     Args:
-        y_true: one-hot encoded targets (T, V)
-        y_pred: predicted probabilities (T, V)
+        y_true_onehot: one-hot encoded targets (T, V)
+        y_pred_logits: predicted logits (T, V)
     Returns:
         Average cross-entropy loss
     """
-    y_true = np.asarray(y_true, dtype=np.float32)
-    y_pred = np.asarray(y_pred, dtype=np.float32)
+    y_true_onehot = np.asarray(y_true_onehot, dtype=np.float32)
+    y_pred_logits = np.asarray(y_pred_logits, dtype=np.float32)
+    
+    # Convert one-hot to sparse indices
+    y_true_indices = np.argmax(y_true_onehot, axis=-1).astype(np.int32)
     
     # Apply softmax to predictions to get probabilities
-    y_pred = y_pred - np.max(y_pred, axis=-1, keepdims=True)  # numerical stability
-    exp_pred = np.exp(y_pred)
+    y_pred_logits = y_pred_logits - np.max(y_pred_logits, axis=-1, keepdims=True)  # numerical stability
+    exp_pred = np.exp(y_pred_logits)
     y_pred_softmax = exp_pred / np.sum(exp_pred, axis=-1, keepdims=True)
     
     # Clip to avoid log(0)
     y_pred_softmax = np.clip(y_pred_softmax, 1e-12, 1.0)
     
-    # Cross-entropy: -sum(y_true * log(y_pred))
-    ce_loss = -np.sum(y_true * np.log(y_pred_softmax), axis=-1)
-    return float(np.mean(ce_loss))
+    # Sparse cross-entropy: -log(pred[true_class]) for each timestep
+    T = y_true_indices.shape[0]
+    ce_losses = []
+    for t in range(T):
+        true_class = y_true_indices[t]
+        if 0 <= true_class < y_pred_softmax.shape[1]:  # valid class
+            ce_losses.append(-np.log(y_pred_softmax[t, true_class]))
+        else:  # invalid class (shouldn't happen but safety)
+            ce_losses.append(10.0)  # high penalty
+    
+    return float(np.mean(ce_losses))
 
 
-def _accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Compute accuracy between one-hot targets and predictions.
+def _sparse_accuracy_from_onehot(y_true_onehot: np.ndarray, y_pred_logits: np.ndarray) -> float:
+    """Compute accuracy from one-hot targets.
     
     Args:
-        y_true: one-hot encoded targets (T, V)
-        y_pred: predicted logits (T, V)
+        y_true_onehot: one-hot encoded targets (T, V)
+        y_pred_logits: predicted logits (T, V)
     Returns:
         Accuracy as fraction of correct predictions
     """
-    y_true = np.asarray(y_true, dtype=np.float32)
-    y_pred = np.asarray(y_pred, dtype=np.float32)
+    y_true_onehot = np.asarray(y_true_onehot, dtype=np.float32)
+    y_pred_logits = np.asarray(y_pred_logits, dtype=np.float32)
+    
+    # Convert one-hot to sparse indices
+    y_true_indices = np.argmax(y_true_onehot, axis=-1)
     
     # Get predicted classes (argmax)
-    pred_classes = np.argmax(y_pred, axis=-1)
-    true_classes = np.argmax(y_true, axis=-1)
+    pred_classes = np.argmax(y_pred_logits, axis=-1)
     
-    return float(np.mean(pred_classes == true_classes))
+    return float(np.mean(pred_classes == y_true_indices))
 
 
 def evaluate_classification(model, val_loader, embeddings: np.ndarray, max_batches: int = 10) -> Dict[str, float]:
@@ -127,8 +142,8 @@ def evaluate_classification(model, val_loader, embeddings: np.ndarray, max_batch
         # Compute predictions and accumulate metrics per sequence
         for X_seq, Y_seq in zip(Xb, Yb):
             Y_pred = model.run(X_seq)
-            losses.append(_cross_entropy(Y_seq, Y_pred))
-            accuracies.append(_accuracy(Y_seq, Y_pred))
+            losses.append(_sparse_cross_entropy_from_onehot(Y_seq, Y_pred))
+            accuracies.append(_sparse_accuracy_from_onehot(Y_seq, Y_pred))
         if i + 1 >= max_batches:
             break
     
