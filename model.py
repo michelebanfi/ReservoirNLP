@@ -26,6 +26,7 @@ class ReservoirConfig:
     input_scaling: float = 1.0
     ridge_alpha: float = 1e-6
     seed: Optional[int] = 42
+    n_reservoirs: int = 1
 
 
 def build_reservoir_model(cfg: ReservoirConfig):
@@ -46,6 +47,30 @@ def build_reservoir_model(cfg: ReservoirConfig):
         input_scaling=cfg.input_scaling,
         activation=np.tanh,
     )
+    if cfg.n_reservoirs > 1:
+        # Create a chain of reservoirs
+        reservoirs = [Reservoir(
+            units=cfg.reservoir_size,
+            sr=cfg.spectral_radius,
+            lr=cfg.leak_rate,
+            input_scaling=cfg.input_scaling,
+            activation=np.tanh,
+            name=f"res{i+1}"
+        ) for i in range(cfg.n_reservoirs)]
+        
+        # Connect reservoirs in a sequence
+        res = reservoirs[0]
+        for i in range(1, len(reservoirs)):
+            res = res >> reservoirs[i]
+    else:
+        res = Reservoir(
+            units=cfg.reservoir_size,
+            sr=cfg.spectral_radius,
+            lr=cfg.leak_rate,
+            input_scaling=cfg.input_scaling,
+            activation=np.tanh,
+        )
+
     res_params = set(inspect.signature(Reservoir.__init__).parameters.keys())
     # connectivity argument naming differences
     if 'density' in res_params:

@@ -15,13 +15,14 @@ class TrainConfig:
     data_path: str = "data"  # directory containing .txt files
 
     # Model (ESN)
-    hidden_size: int = 256
+    hidden_size: int = 1024
     spectral_radius: float = 0.85
     sparsity: float = 0.9
     leak_rate: float = 0.25
-    readout_dim: int = 256
+    readout_dim: int = 1024
     dropout: float = 0.5
     use_sparse_reservoir: bool = True
+    n_reservoirs: int = 1
 
     # Training
     epochs: int = 2

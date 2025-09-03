@@ -4,7 +4,7 @@ import numpy as np
 from tokenizer import CharTokenizer
 from dataset import create_dataloaders
 from model import ReservoirConfig, build_reservoir_model, make_random_embeddings
-from train import fit_offline, evaluate_mse, batch_to_embeddings
+from train import fit_offline, evaluate_classification, batch_to_embeddings
 
 
 def test_fit_and_run():

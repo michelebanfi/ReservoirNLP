@@ -39,10 +39,10 @@ def batch_to_embeddings(
         xt = x_np[b, :-1]
         yt = y_np[b, :-1]
         X = embeddings[xt]  # (T-1, D)
-    # One-hot targets via advanced indexing
-    Y = eye[yt]  # (T-1, V)
-    X_list.append(X.astype(np.float32))
-    Y_list.append(Y.astype(np.float32))
+        # One-hot targets via advanced indexing
+        Y = eye[yt]  # (T-1, V)
+        X_list.append(X.astype(np.float32))
+        Y_list.append(Y.astype(np.float32))
     return X_list, Y_list
 
 
@@ -73,13 +73,80 @@ def fit_offline(model, train_loader, embeddings: np.ndarray, max_batches: int | 
     return history
 
 
+def _cross_entropy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Compute categorical cross-entropy loss between one-hot targets and predictions.
+    
+    Args:
+        y_true: one-hot encoded targets (T, V)
+        y_pred: predicted probabilities (T, V)
+    Returns:
+        Average cross-entropy loss
+    """
+    y_true = np.asarray(y_true, dtype=np.float32)
+    y_pred = np.asarray(y_pred, dtype=np.float32)
+    
+    # Apply softmax to predictions to get probabilities
+    y_pred = y_pred - np.max(y_pred, axis=-1, keepdims=True)  # numerical stability
+    exp_pred = np.exp(y_pred)
+    y_pred_softmax = exp_pred / np.sum(exp_pred, axis=-1, keepdims=True)
+    
+    # Clip to avoid log(0)
+    y_pred_softmax = np.clip(y_pred_softmax, 1e-12, 1.0)
+    
+    # Cross-entropy: -sum(y_true * log(y_pred))
+    ce_loss = -np.sum(y_true * np.log(y_pred_softmax), axis=-1)
+    return float(np.mean(ce_loss))
+
+
+def _accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Compute accuracy between one-hot targets and predictions.
+    
+    Args:
+        y_true: one-hot encoded targets (T, V)
+        y_pred: predicted logits (T, V)
+    Returns:
+        Accuracy as fraction of correct predictions
+    """
+    y_true = np.asarray(y_true, dtype=np.float32)
+    y_pred = np.asarray(y_pred, dtype=np.float32)
+    
+    # Get predicted classes (argmax)
+    pred_classes = np.argmax(y_pred, axis=-1)
+    true_classes = np.argmax(y_true, axis=-1)
+    
+    return float(np.mean(pred_classes == true_classes))
+
+
+def evaluate_classification(model, val_loader, embeddings: np.ndarray, max_batches: int = 10) -> Dict[str, float]:
+    """Evaluate model using proper classification metrics (cross-entropy and accuracy)."""
+    losses: List[float] = []
+    accuracies: List[float] = []
+    
+    for i, (x, y) in enumerate(val_loader):
+        Xb, Yb = batch_to_embeddings(x, y, embeddings)
+        # Compute predictions and accumulate metrics per sequence
+        for X_seq, Y_seq in zip(Xb, Yb):
+            Y_pred = model.run(X_seq)
+            losses.append(_cross_entropy(Y_seq, Y_pred))
+            accuracies.append(_accuracy(Y_seq, Y_pred))
+        if i + 1 >= max_batches:
+            break
+    
+    return {
+        "cross_entropy": float(np.mean(losses) if losses else 0.0),
+        "accuracy": float(np.mean(accuracies) if accuracies else 0.0)
+    }
+
+
 def _mse(a: np.ndarray, b: np.ndarray) -> float:
+    """Legacy MSE function - kept for compatibility but shouldn't be used for classification."""
     a = np.asarray(a, dtype=np.float32)
     b = np.asarray(b, dtype=np.float32)
     return float(np.mean((a - b) ** 2))
 
 
 def evaluate_mse(model, val_loader, embeddings: np.ndarray, max_batches: int = 10) -> float:
+    """Legacy MSE evaluation - kept for compatibility but shouldn't be used for classification."""
     losses: List[float] = []
     for i, (x, y) in enumerate(val_loader):
         Xb, Yb = batch_to_embeddings(x, y, embeddings)

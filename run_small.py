@@ -7,7 +7,7 @@ from tokenizer import CharTokenizer
 from bpe_tokenizer import BPETokenizer
 from dataset import create_dataloaders
 from model import ReservoirConfig, build_reservoir_model, make_random_embeddings
-from train import fit_offline, evaluate_mse
+from train import fit_offline, evaluate_classification
 from config import TrainConfig
 
 
@@ -68,6 +68,7 @@ def main():
     train_text_for_bpe = full_text[:split_idx]
     val_text_for_bpe = full_text[split_idx:]
     text = full_text
+    
     # Choose tokenizer
     if cfg.tokenizer_type == 'bpe':
         try:
@@ -109,6 +110,7 @@ def main():
         input_scaling=1.0,
         ridge_alpha=1e-5,
         seed=42,
+        n_reservoirs=cfg.n_reservoirs,
     )
     model = build_reservoir_model(cfg_model)
 
@@ -117,11 +119,9 @@ def main():
     ckpt = cfg.ckpt_path  # kept for compatibility, saving not implemented with reservoirpy here
     # Offline fit in small chunks for memory safety
     fit_offline(model, train_loader, embeddings, max_batches=64)
-    # Final quick eval (MSE on one-hot targets)
-    final_val = evaluate_mse(model, val_loader, embeddings, max_batches=cfg.eval_batches)
-    print("Training done. Last metrics:", {
-        "val_mse": final_val,
-    })
+    # Final evaluation using proper classification metrics
+    final_metrics = evaluate_classification(model, val_loader, embeddings, max_batches=cfg.eval_batches)
+    print("Training done. Evaluation metrics:", final_metrics)
 
     # 5) Quick sample generation (light sampling)
     # Simple greedy sampling with reservoirpy: keep only last step prediction
