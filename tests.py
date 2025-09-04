@@ -18,7 +18,7 @@ def test_fit_and_run():
     embed_dim = 32
     E = make_random_embeddings(tok.vocab_size, embed_dim)
     cfg = ReservoirConfig(input_dim=embed_dim, output_dim=tok.vocab_size, reservoir_size=64, density=0.1)
-    model = build_reservoir_model(cfg)
+    model, _ = build_reservoir_model(cfg, E)
     # Fit on one chunk
     fit_offline(model, train_loader, E, max_batches=1)
     # Run on one batch and compute shape

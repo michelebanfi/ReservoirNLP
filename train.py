@@ -80,6 +80,34 @@ def fit_offline(model, train_loader, embeddings: np.ndarray, pos_encoding: Optio
     return history
 
 
+def fit_online(model, train_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int | None = None) -> Dict:
+    """Online training loop that streams batches and calls partial_fit if supported.
+
+    Intended for use with an RLS readout. Falls back to per-sequence fit if partial_fit
+    is not available on the composed model.
+    """
+    history: Dict[str, float] = {}
+    used_partial = hasattr(model, "partial_fit")
+    seen = 0
+    for i, (x, y) in enumerate(train_loader):
+        Xb, Yb = batch_to_embeddings(x, y, embeddings, pos_encoding, pos_scale)
+        for X_seq, Y_seq in zip(Xb, Yb):
+            if used_partial:
+                try:
+                    model.partial_fit(X_seq, Y_seq)
+                except Exception:
+                    # Fallback if the composed graph doesn't expose partial_fit properly
+                    model.fit([X_seq], [Y_seq])
+            else:
+                model.fit([X_seq], [Y_seq])
+        seen += 1
+        if max_batches is not None and i + 1 >= max_batches:
+            break
+    history["used_partial_fit"] = bool(used_partial)
+    history["batches"] = seen
+    return history
+
+
 def compute_vocab_logits(
     pred_embeddings: np.ndarray,
     embeddings: np.ndarray,

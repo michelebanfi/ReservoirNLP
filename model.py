@@ -94,7 +94,11 @@ class ReservoirConfig:
     - density: connection density in (0,1]; use 1 - sparsity from old config
     - leak_rate: leaky integration rate
     - input_scaling: scaling for inputs
-    - ridge_alpha: ridge regularization strength for readout
+    - readout_type: 'ridge' (default) or 'rls'
+    - ridge_alpha: ridge regularization strength for Ridge readout
+    - rls_alpha: diagonal initialization of P matrix for RLS
+    - rls_forgetting: forgetting factor for RLS (<=1.0)
+    - rls_fit_bias: whether to learn a bias term in RLS
     - use_positional_encoding: whether to add positional encoding
     - pos_encoding_type: type of positional encoding ("sinusoidal", "learned", "none")
     - max_sequence_length: maximum sequence length for positional encoding
@@ -106,7 +110,12 @@ class ReservoirConfig:
     density: float = 0.1
     leak_rate: float = 0.3
     input_scaling: float = 1.0
+    # Readout / learning rule
+    readout_type: str = "ridge"  # "ridge" or "rls"
     ridge_alpha: float = 1e-6
+    rls_alpha: float = 1e-1
+    rls_forgetting: float = 1.0
+    rls_fit_bias: bool = True
     seed: Optional[int] = 42
     n_reservoirs: int = 1
     use_positional_encoding: bool = True
@@ -130,7 +139,7 @@ def build_reservoir_model(
         pos_encoding: positional encoding matrix (max_len, D) or None if disabled
     """
     try:
-        from reservoirpy.nodes import Reservoir, Ridge
+        from reservoirpy.nodes import Reservoir, Ridge, RLS
     except ImportError:
         raise ImportError("Please install reservoirpy: pip install reservoirpy")
 
@@ -187,18 +196,29 @@ def build_reservoir_model(
         prev_output_size = config.reservoir_size
     
     # Output layer: Map reservoir states (H_dim) to embedding space (D)
-    # Then we'll compute similarities with embeddings to get vocabulary logits
-    ridge_kwargs = {}
-    ridge_sig = inspect.signature(Ridge)
-    ridge_params = set(ridge_sig.parameters.keys())
-    
-    if "alpha" in ridge_params:
-        ridge_kwargs["alpha"] = config.ridge_alpha
-    elif "ridge" in ridge_params:
-        ridge_kwargs["ridge"] = config.ridge_alpha
-    
-    # Map to embedding space, not directly to vocabulary
-    readout = Ridge(output_dim=embed_dim, **ridge_kwargs)
+    # Choose learning rule: Ridge (offline) or RLS (online-capable)
+    if config.readout_type.lower() == "ridge":
+        ridge_kwargs = {}
+        ridge_sig = inspect.signature(Ridge)
+        ridge_params = set(ridge_sig.parameters.keys())
+        if "alpha" in ridge_params:
+            ridge_kwargs["alpha"] = config.ridge_alpha
+        elif "ridge" in ridge_params:
+            ridge_kwargs["ridge"] = config.ridge_alpha
+        readout = Ridge(output_dim=embed_dim, **ridge_kwargs)
+    elif config.readout_type.lower() == "rls":
+        rls_kwargs = {"output_dim": embed_dim}
+        rls_sig = inspect.signature(RLS)
+        rls_params = set(rls_sig.parameters.keys())
+        if "alpha" in rls_params:
+            rls_kwargs["alpha"] = config.rls_alpha
+        if "forgetting" in rls_params:
+            rls_kwargs["forgetting"] = config.rls_forgetting
+        if "fit_bias" in rls_params:
+            rls_kwargs["fit_bias"] = config.rls_fit_bias
+        readout = RLS(**rls_kwargs)
+    else:
+        raise ValueError(f"Unknown readout_type: {config.readout_type}. Use 'ridge' or 'rls'.")
     
     # Chain all components
     if len(reservoirs) == 1:

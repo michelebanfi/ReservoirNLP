@@ -29,6 +29,11 @@ class TrainConfig:
     n_reservoirs: int = 3
 
     # Training
+    readout_type: str = "ridge"  # "ridge" or "rls"
+    ridge_alpha: float = 1e-5
+    rls_alpha: float = 1e-1
+    rls_forgetting: float = 1.0
+    rls_fit_bias: bool = True
     epochs: int = 2
     lr: float = 3e-4
     weight_decay: float = 5e-3

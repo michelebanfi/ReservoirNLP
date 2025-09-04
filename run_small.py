@@ -7,7 +7,7 @@ from tokenizer import CharTokenizer
 from bpe_tokenizer import BPETokenizer
 from dataset import create_dataloaders
 from model import ReservoirConfig, build_reservoir_model, make_random_embeddings
-from train import fit_offline, evaluate_classification
+from train import fit_offline, fit_online, evaluate_classification
 from config import TrainConfig
 
 
@@ -108,7 +108,11 @@ def main():
         density=density,
         leak_rate=cfg.leak_rate,
         input_scaling=1.0,
-        ridge_alpha=1e-5,
+        readout_type=getattr(cfg, 'readout_type', 'ridge'),
+        ridge_alpha=getattr(cfg, 'ridge_alpha', 1e-5),
+        rls_alpha=getattr(cfg, 'rls_alpha', 1e-1),
+        rls_forgetting=getattr(cfg, 'rls_forgetting', 1.0),
+        rls_fit_bias=getattr(cfg, 'rls_fit_bias', True),
         seed=42,
         n_reservoirs=cfg.n_reservoirs,
         use_positional_encoding=cfg.use_positional_encoding,
@@ -121,8 +125,13 @@ def main():
     # 4) Train
     os.makedirs('models', exist_ok=True)
     ckpt = cfg.ckpt_path  # kept for compatibility, saving not implemented with reservoirpy here
-    # Offline fit in small chunks for memory safety
-    fit_offline(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64)
+    # Train with chosen readout rule
+    if cfg.readout_type.lower() == 'rls':
+        print("Training with RLS (online)")
+        fit_online(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64)
+    else:
+        print("Training with Ridge (offline)")
+        fit_offline(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64)
     # Final evaluation using proper classification metrics
     final_metrics = evaluate_classification(model, val_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=cfg.eval_batches)
     print("Training done. Evaluation metrics:", final_metrics)
