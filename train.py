@@ -39,20 +39,22 @@ def batch_to_embeddings(
         # Use T-1 pairs
         xt = x_np[b, :-1]  # input tokens
         yt = y_np[b, :-1]  # target tokens
-        X = embeddings[xt]  # (T-1, D) - embed input tokens  
+        X = embeddings[xt]  # (T-1, D) - embed input tokens
         Y = embeddings[yt]  # (T-1, D) - embed target tokens (NOT one-hot!)
-        
+        # Normalize targets to unit norm to match cosine-similarity decoding
+        Yn = Y / (np.linalg.norm(Y, axis=1, keepdims=True) + 1e-8)
+
         # Apply positional encoding to inputs if provided
         if pos_encoding is not None:
             from model import apply_positional_encoding
             X = apply_positional_encoding(X, pos_encoding, scale_factor=pos_scale)
-        
+
         X_list.append(X.astype(np.float32))
-        Y_list.append(Y.astype(np.float32))
+        Y_list.append(Yn.astype(np.float32))
     return X_list, Y_list
 
 
-def fit_offline(model, train_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int | None = None) -> Dict:
+def fit_offline(model, train_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int | None = None, warmup: int = 0) -> Dict:
     """Offline training with model.fit on a subset of batches.
 
     To limit memory usage on Kaggle, we fit incrementally by concatenating batches
@@ -65,6 +67,9 @@ def fit_offline(model, train_loader, embeddings: np.ndarray, pos_encoding: Optio
     seen = 0
     for i, (x, y) in enumerate(train_loader):
         Xb, Yb = batch_to_embeddings(x, y, embeddings, pos_encoding, pos_scale)
+        if warmup > 0:
+            Xb = [Xi[warmup:] if Xi.shape[0] > warmup else Xi for Xi in Xb]
+            Yb = [Yi[warmup:] if Yi.shape[0] > warmup else Yi for Yi in Yb]
         X_all.extend(Xb)
         Y_all.extend(Yb)
         seen += 1
@@ -80,7 +85,7 @@ def fit_offline(model, train_loader, embeddings: np.ndarray, pos_encoding: Optio
     return history
 
 
-def fit_online(model, train_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int | None = None) -> Dict:
+def fit_online(model, train_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int | None = None, warmup: int = 0) -> Dict:
     """Online training loop that streams batches and calls partial_fit if supported.
 
     Intended for use with an RLS readout. Falls back to per-sequence fit if partial_fit
@@ -92,14 +97,25 @@ def fit_online(model, train_loader, embeddings: np.ndarray, pos_encoding: Option
     for i, (x, y) in enumerate(train_loader):
         Xb, Yb = batch_to_embeddings(x, y, embeddings, pos_encoding, pos_scale)
         for X_seq, Y_seq in zip(Xb, Yb):
+            # Apply warmup by feeding but not updating
+            if warmup > 0 and X_seq.shape[0] > warmup:
+                try:
+                    _ = model.run(X_seq[:warmup])
+                except Exception:
+                    pass
+                X_use = X_seq[warmup:]
+                Y_use = Y_seq[warmup:]
+            else:
+                X_use = X_seq
+                Y_use = Y_seq
             if used_partial:
                 try:
-                    model.partial_fit(X_seq, Y_seq)
+                    model.partial_fit(X_use, Y_use)
                 except Exception:
                     # Fallback if the composed graph doesn't expose partial_fit properly
-                    model.fit([X_seq], [Y_seq])
+                    model.fit([X_use], [Y_use])
             else:
-                model.fit([X_seq], [Y_seq])
+                model.fit([X_use], [Y_use])
         seen += 1
         if max_batches is not None and i + 1 >= max_batches:
             break
@@ -113,7 +129,7 @@ def compute_vocab_logits(
     embeddings: np.ndarray,
     temperature: float = 1.0
 ) -> np.ndarray:
-    """Convert predicted embeddings to vocabulary logits via similarity.
+    """Convert predicted embeddings to vocabulary logits via cosine similarity.
     
     Args:
         pred_embeddings: (T, D) predicted embedding vectors
@@ -123,9 +139,16 @@ def compute_vocab_logits(
     Returns:
         logits: (T, V) unnormalized log probabilities
     """
-    # Compute similarities: (T, D) @ (D, V) -> (T, V)
-    similarities = pred_embeddings @ embeddings.T  # (T, V)
-    return similarities / temperature
+    # Normalize for cosine similarity
+    E = embeddings.astype(np.float32)
+    E_norm = np.linalg.norm(E, axis=1, keepdims=True) + 1e-8
+    E_unit = E / E_norm
+    Y = pred_embeddings.astype(np.float32)
+    Y_norm = np.linalg.norm(Y, axis=1, keepdims=True) + 1e-8
+    Y_unit = Y / Y_norm
+    # Cosine similarity -> logits
+    similarities = Y_unit @ E_unit.T  # (T, V)
+    return similarities / max(1e-6, float(temperature))
 
 
 def _sparse_cross_entropy_from_embeddings(
@@ -209,7 +232,7 @@ def _sparse_accuracy_from_onehot(y_true_onehot: np.ndarray, y_pred_logits: np.nd
     return float(np.mean(pred_classes == y_true_indices))
 
 
-def evaluate_classification(model, val_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int = 10) -> Dict[str, float]:
+def evaluate_classification(model, val_loader, embeddings: np.ndarray, pos_encoding: Optional[np.ndarray] = None, pos_scale: float = 0.1, max_batches: int = 10, warmup: int = 0) -> Dict[str, float]:
     """Evaluate model using proper classification metrics (cross-entropy and accuracy).
     
     Now works with embedding-to-embedding approach, converting predictions to logits for metrics.
@@ -220,19 +243,23 @@ def evaluate_classification(model, val_loader, embeddings: np.ndarray, pos_encod
     
     for i, (x, y) in enumerate(val_loader):
         Xb, Yb = batch_to_embeddings(x, y, embeddings, pos_encoding, pos_scale)
+        # Also get token targets to compute exact labels
+        if hasattr(y, "cpu") and hasattr(y, "numpy"):
+            y_np = y.cpu().numpy()
+        else:
+            y_np = np.asarray(y)
         # Compute predictions and accumulate metrics per sequence
-        for X_seq, Y_embed_seq in zip(Xb, Yb):
+        for b, (X_seq, Y_embed_seq) in enumerate(zip(Xb, Yb)):
             # Get embedding predictions from reservoir
             Y_pred_embed = model.run(X_seq)  # (T, D)
             
-            # Convert target embeddings back to token indices for loss computation
-            T = Y_embed_seq.shape[0]
-            y_true_indices = []
-            for t in range(T):
-                # Find which embedding this target corresponds to
-                distances = np.sum((embeddings - Y_embed_seq[t]) ** 2, axis=1)
-                y_true_indices.append(np.argmin(distances))
-            y_true_indices = np.array(y_true_indices)
+            # Compute true token indices directly from dataset tokens
+            y_tokens = y_np[b, :-1]  # align with X formed from x[:-1]
+            if warmup > 0 and y_tokens.shape[0] > warmup:
+                y_tokens = y_tokens[warmup:]
+            # Truncate to match prediction length in case of small sequences
+            T_pred = Y_pred_embed.shape[0]
+            y_true_indices = y_tokens[:T_pred].astype(np.int64)
             
             # Compute loss and accuracy using embedding-based approach
             loss = _sparse_cross_entropy_from_embeddings(Y_pred_embed, y_true_indices, embeddings)

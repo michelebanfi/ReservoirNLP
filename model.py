@@ -190,6 +190,14 @@ def build_reservoir_model(
             "input_scaling": config.input_scaling,
             "seed": config.seed + i
         })
+        # Handle density/connectivity/sparsity naming differences
+        if "density" in reservoir_params:
+            reservoir_kwargs["density"] = config.density
+        elif "connectivity" in reservoir_params:
+            reservoir_kwargs["connectivity"] = config.density
+        elif "sparsity" in reservoir_params:
+            # sparsity is 1 - density
+            reservoir_kwargs["sparsity"] = max(0.0, min(1.0, 1.0 - config.density))
         
         reservoir = Reservoir(**reservoir_kwargs)
         reservoirs.append(reservoir)
@@ -205,6 +213,8 @@ def build_reservoir_model(
             ridge_kwargs["alpha"] = config.ridge_alpha
         elif "ridge" in ridge_params:
             ridge_kwargs["ridge"] = config.ridge_alpha
+        if "fit_bias" in ridge_params:
+            ridge_kwargs["fit_bias"] = True
         readout = Ridge(output_dim=embed_dim, **ridge_kwargs)
     elif config.readout_type.lower() == "rls":
         rls_kwargs = {"output_dim": embed_dim}

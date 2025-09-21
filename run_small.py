@@ -128,10 +128,10 @@ def main():
     # Train with chosen readout rule
     if cfg.readout_type.lower() == 'rls':
         print("Training with RLS (online)")
-        fit_online(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64)
+        fit_online(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64, warmup=getattr(cfg, 'rls_warmup', 10))
     else:
         print("Training with Ridge (offline)")
-        fit_offline(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64)
+        fit_offline(model, train_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=64, warmup=0)
     # Final evaluation using proper classification metrics
     final_metrics = evaluate_classification(model, val_loader, embeddings, pos_encoding, cfg.pos_encoding_scale, max_batches=cfg.eval_batches)
     print("Training done. Evaluation metrics:", final_metrics)

@@ -34,6 +34,7 @@ class TrainConfig:
     rls_alpha: float = 1e-1
     rls_forgetting: float = 1.0
     rls_fit_bias: bool = True
+    rls_warmup: int = 10  # timesteps to skip before updating
     epochs: int = 2
     lr: float = 3e-4
     weight_decay: float = 5e-3
