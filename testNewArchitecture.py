@@ -77,10 +77,16 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:x.size(0), :]
 
 class ReservoirLayer(nn.Module):
-    def __init__(self, d_model, max_seq_len, activation=nn.GELU(), spectral_radius=1.1, dropout=0.1):
+    def __init__(self, d_model, max_seq_len, activation=nn.GELU(), spectral_radius=1.1, dropout=0.1, num_heads=4):
         super(ReservoirLayer, self).__init__()
-        fractal_res = generate_fractal_matrix(max_seq_len, causal=True)
-        self.scipy_W_res = normalize_spectral_radius(fractal_res, spectral_radius)
+        self.num_heads = num_heads
+        self.d_model = d_model
+        self.head_dim = d_model // num_heads
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+        
+        # Generate separate fractal matrices for each head
+        self.scipy_W_res_heads = [normalize_spectral_radius(generate_fractal_matrix(max_seq_len, causal=True), spectral_radius) for _ in range(num_heads)]
+        
         self.activation = activation
         self.mlp = nn.Sequential(
             nn.Linear(d_model, 4 * d_model),
@@ -91,20 +97,30 @@ class ReservoirLayer(nn.Module):
         )
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
+        # Output projection to combine heads
+        self.out_proj = nn.Linear(d_model * num_heads, d_model)
 
     def forward(self, x):
         seq_len, batch_size, d_model = x.shape
-        sub_matrix_scipy = self.scipy_W_res[:seq_len, :seq_len]
-        w_res_sub = to_torch_sparse(sub_matrix_scipy).to(x.device)
         
-        # This is a bit of a trick to apply the same matrix to each item in the batch
-        # It's less efficient than a batched sparse multiply, but easier to implement
-        res_outputs = []
-        for i in range(batch_size):
-            res_outputs.append(torch.sparse.mm(w_res_sub, x[:, i, :]))
-        x_res = torch.stack(res_outputs).permute(1, 0, 2)
+        # Process each head
+        head_outputs = []
+        for head in range(self.num_heads):
+            sub_matrix_scipy = self.scipy_W_res_heads[head][:seq_len, :seq_len]
+            w_res_sub = to_torch_sparse(sub_matrix_scipy).to(x.device)
+            
+            # Apply reservoir for this head
+            res_outputs = []
+            for i in range(batch_size):
+                res_outputs.append(torch.sparse.mm(w_res_sub, x[:, i, :]))
+            x_res = torch.stack(res_outputs).permute(1, 0, 2)
+            x_res = self.activation(x_res)
+            head_outputs.append(x_res)
         
-        x_res = self.activation(x_res)
+        # Concatenate heads
+        x_res = torch.cat(head_outputs, dim=-1)  # (seq_len, batch_size, d_model)
+        x_res = self.out_proj(x_res)  # Project back to d_model
+        
         x = self.norm1(x + x_res)
         x_mlp = self.mlp(x)
         x = self.norm2(x + x_mlp)
@@ -113,7 +129,7 @@ class ReservoirLayer(nn.Module):
 # --- Step 3: The Causal Reservoir Transformer Model ---
 
 class ReservoirLM(nn.Module):
-    def __init__(self, vocab_size, d_model, num_layers, max_seq_len, dropout=0.1):
+    def __init__(self, vocab_size, d_model, num_layers, max_seq_len, dropout=0.1, num_heads=4):
         super(ReservoirLM, self).__init__()
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
@@ -121,7 +137,7 @@ class ReservoirLM(nn.Module):
         # self.embedding.weight.requires_grad = False  # Commented out to allow training
         self.pos_encoder = PositionalEncoding(d_model, max_seq_len)
         self.layers = nn.ModuleList([
-            ReservoirLayer(d_model, max_seq_len, dropout=dropout) for _ in range(num_layers)
+            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads) for _ in range(num_layers)
         ])
         # Additional trainable projection after reservoir layers
         self.additional_proj = nn.Linear(d_model, d_model)
