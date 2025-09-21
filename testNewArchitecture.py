@@ -245,53 +245,6 @@ val_perplexity = math.exp(total_val_loss / len(val_loader))
 print(f"Validation Perplexity: {val_perplexity:.4f}")
 val_loader = DataLoader([{'text': t} for t in val_dataset['text']], batch_size=BATCH_SIZE*5, collate_fn=collate_fn)
 
-# 4. Training Loop
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ReservoirLM(VOCAB_SIZE, D_MODEL, NUM_LAYERS, MAX_SEQ_LEN).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-warmup_epochs = int(0.1 * EPOCHS)  # 10% warmup
-scheduler = SequentialLR(optimizer, [
-    LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs),
-    CosineAnnealingLR(optimizer, T_max=EPOCHS - warmup_epochs)
-], milestones=[warmup_epochs])
-criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
-
-print(f"Starting training on {device}...")
-for epoch in range(EPOCHS):
-    model.train()
-    total_loss = 0
-    for inputs, targets in train_loader:
-        if inputs is None: continue
-        inputs, targets = inputs.to(device), targets.to(device)
-        
-        optimizer.zero_grad()
-        outputs = model(inputs) # Shape: (seq_len, batch_size, vocab_size)
-        
-        # Reshape for loss calculation
-        loss = criterion(outputs.reshape(-1, VOCAB_SIZE), targets.reshape(-1))
-        
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        total_loss += loss.item()
-    
-    scheduler.step()
-    print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {total_loss / len(train_loader):.4f}")
-
-# Compute validation perplexity
-model.eval()
-val_loss = 0
-with torch.no_grad():
-    for inputs, targets in val_loader:
-        if inputs is None: continue
-        inputs, targets = inputs.to(device), targets.to(device)
-        outputs = model(inputs)
-        loss = criterion(outputs.reshape(-1, VOCAB_SIZE), targets.reshape(-1))
-        val_loss += loss.item()
-val_loss /= len(val_loader)
-perplexity = math.exp(val_loss)
-print(f"Validation Perplexity: {perplexity:.4f}")
-
 # 5. Test Generation
 def generate_text(model, tokenizer, prompt, max_new_tokens=50, temperature=0.8):
     model.eval()
