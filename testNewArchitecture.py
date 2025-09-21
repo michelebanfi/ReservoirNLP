@@ -155,7 +155,7 @@ D_MODEL = 512
 NUM_LAYERS = 3
 MAX_SEQ_LEN = 128
 BATCH_SIZE = 8
-EPOCHS = 1
+EPOCHS = 10
 LR = 0.001
 
 # 1. Load Dataset from WikiText-103
