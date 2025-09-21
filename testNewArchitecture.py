@@ -145,9 +145,9 @@ from tokenizers.pre_tokenizers import Whitespace
 from torch.utils.data import DataLoader
 
 # Hyperparameters
-VOCAB_SIZE = 5000 # Smaller vocab for this toy example
-D_MODEL = 64
-NUM_LAYERS = 2
+VOCAB_SIZE = 10000 # Smaller vocab for this toy example
+D_MODEL = 256
+NUM_LAYERS = 3
 MAX_SEQ_LEN = 128
 BATCH_SIZE = 8
 EPOCHS = 10
