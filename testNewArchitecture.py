@@ -10,34 +10,89 @@ import os
 
 # --- Step 1: Helper functions for the Reservoir Matrix (with Causal Mask) ---
 
-def generate_fractal_matrix(dim, base_pattern=None, causal=False):
-    """Generates a sparse matrix with a recursive fractal pattern, optionally causal."""
+def _base_pattern_by_rule(rule: str, base_dim: int | None = None, density: float = 0.5) -> np.ndarray:
+    """Return a base binary pattern according to the requested rule.
+    Rules:
+      - 'cross8': 3x3 with hole center, 8 ones (original default)
+      - 'ring4': 3x3 ring with 4 ones
+      - 'checker': 3x3 checkerboard-like
+      - 'diag': diagonals set to 1
+      - 'sierpinski': 2x2 [[1,1],[1,0]]
+      - 'random': random base_dim x base_dim with given density
+    """
+    rule = (rule or 'cross8').lower()
+    if rule == 'sierpinski':
+        return np.array([[1, 1], [1, 0]], dtype=int)
+    if rule == 'cross8':
+        return np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=int)
+    if rule == 'ring4':
+        return np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=int)
+    if rule == 'checker':
+        return np.array([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=int)
+    if rule == 'diag':
+        n = base_dim or 3
+        eye1 = np.eye(n, dtype=int)
+        eye2 = np.fliplr(eye1)
+        patt = np.clip(eye1 + eye2, 0, 1)
+        # Optional: zero center for odd n
+        if n % 2 == 1:
+            patt[n//2, n//2] = 0
+        return patt
+    if rule == 'random':
+        n = base_dim or 3
+        rng = np.random.default_rng(42)
+        patt = (rng.random((n, n)) < density).astype(int)
+        # Ensure not all-zero
+        if patt.sum() == 0:
+            patt[rng.integers(0, n), rng.integers(0, n)] = 1
+        # Encourage a hole in the center if odd
+        if n % 2 == 1:
+            patt[n//2, n//2] = 0
+        return patt
+    # Fallback
+    return np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=int)
+
+
+def generate_fractal_matrix(
+    dim: int,
+    base_pattern: np.ndarray | None = None,
+    causal: bool = False,
+    *,
+    rule: str = 'cross8',
+    base_dim: int | None = None,
+    density: float = 0.5,
+) -> csr_matrix:
+    """Generates a sparse matrix with a recursive fractal pattern, optionally causal.
+    You can either pass a concrete base_pattern, or select a `rule`.
+    """
     if base_pattern is None:
-        base_pattern = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]])
-    
-    base_dim = base_pattern.shape[0]
+        base_pattern = _base_pattern_by_rule(rule, base_dim=base_dim, density=density)
+
+    base_dim_local = base_pattern.shape[0]
     if dim == 1:
         return eye(1, format='csr')
 
-    power = math.ceil(math.log(dim, base_dim))
-    actual_dim = base_dim ** power
-    
+    power = math.ceil(math.log(dim, base_dim_local))
+    actual_dim = base_dim_local ** power
+
     # Recursive build
-    sub_dim = actual_dim // base_dim
-    smaller_matrix = generate_fractal_matrix(sub_dim, base_pattern, causal=causal)
-    
+    sub_dim = actual_dim // base_dim_local
+    smaller_matrix = generate_fractal_matrix(
+        sub_dim, base_pattern=base_pattern, causal=causal, rule=rule, base_dim=base_dim, density=density
+    )
+
     new_matrix = lil_matrix((actual_dim, actual_dim))
-    for i in range(base_dim):
-        for j in range(base_dim):
+    for i in range(base_dim_local):
+        for j in range(base_dim_local):
             if base_pattern[i, j] == 1:
                 start_row, end_row = i * sub_dim, (i + 1) * sub_dim
                 start_col, end_col = j * sub_dim, (j + 1) * sub_dim
                 new_matrix[start_row:end_row, start_col:end_col] = smaller_matrix
 
-    # NEW: Apply causal mask if requested
+    # Apply causal mask if requested
     if causal:
-        new_matrix = tril(new_matrix, k=-1) # k=-1 makes it strictly lower triangular
-                
+        new_matrix = tril(new_matrix, k=-1)  # strictly lower triangular
+
     return new_matrix.tocsr()[:dim, :dim]
 
 def normalize_spectral_radius(matrix, target_radius=0.99):
@@ -77,15 +132,25 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:x.size(0), :]
 
 class ReservoirLayer(nn.Module):
-    def __init__(self, d_model, max_seq_len, activation=nn.GELU(), spectral_radius=1.1, dropout=0.1, num_heads=4):
+    def __init__(self, d_model, max_seq_len, activation=nn.GELU(), spectral_radius=1.1, dropout=0.1, num_heads=4,
+                 head_rules: list[str] | None = None):
         super(ReservoirLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
         self.head_dim = d_model // num_heads
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         
-        # Generate separate fractal matrices for each head
-        self.scipy_W_res_heads = [normalize_spectral_radius(generate_fractal_matrix(max_seq_len, causal=True), spectral_radius) for _ in range(num_heads)]
+        # Generate separate fractal matrices for each head (allow different rules per head)
+        default_rules = ['cross8', 'ring4', 'checker', 'diag']
+        if head_rules is None:
+            head_rules = [default_rules[i % len(default_rules)] for i in range(num_heads)]
+        self._head_rules = head_rules
+        self.scipy_W_res_heads = [
+            normalize_spectral_radius(
+                generate_fractal_matrix(max_seq_len, causal=True, rule=head_rules[i % len(head_rules)]), spectral_radius
+            )
+            for i in range(num_heads)
+        ]
         
         self.activation = activation
         self.mlp = nn.Sequential(
@@ -129,7 +194,8 @@ class ReservoirLayer(nn.Module):
 # --- Step 3: The Causal Reservoir Transformer Model ---
 
 class ReservoirLM(nn.Module):
-    def __init__(self, vocab_size, d_model, num_layers, max_seq_len, dropout=0.1, num_heads=4):
+    def __init__(self, vocab_size, d_model, num_layers, max_seq_len, dropout=0.1, num_heads=4,
+                 head_rules: list[str] | None = None):
         super(ReservoirLM, self).__init__()
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
@@ -137,7 +203,8 @@ class ReservoirLM(nn.Module):
         # self.embedding.weight.requires_grad = False  # Commented out to allow training
         self.pos_encoder = PositionalEncoding(d_model, max_seq_len)
         self.layers = nn.ModuleList([
-            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads) for _ in range(num_layers)
+            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads, head_rules=head_rules)
+            for _ in range(num_layers)
         ])
         # Additional trainable projection after reservoir layers
         self.additional_proj = nn.Linear(d_model, d_model)
@@ -169,7 +236,7 @@ from torch.utils.data import DataLoader
 VOCAB_SIZE = 10000
 D_MODEL = 512
 NUM_LAYERS = 3
-MAX_SEQ_LEN = 128
+MAX_SEQ_LEN = 512
 BATCH_SIZE = 8
 EPOCHS = 10
 LR = 0.001
@@ -230,6 +297,32 @@ scheduler = SequentialLR(optimizer, [
 ], milestones=[warmup_epochs])
 criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
 
+# Visualize reservoir matrix
+def plot_reservoir_matrix(matrix, title="Reservoir Matrix"):
+    plt.figure(figsize=(8, 8))
+    plt.imshow(matrix.toarray(), cmap='viridis', aspect='auto')
+    plt.colorbar()
+    plt.title(title)
+    plt.savefig(f'output/{title.replace(" ", "_")}.png')
+    plt.close()
+    print(f"Reservoir plot saved to output/{title.replace(' ', '_')}.png")
+
+# Ensure output dir exists before plotting
+os.makedirs('output', exist_ok=True)
+
+# Plot reservoir matrices from the first layer (all heads if available)
+if hasattr(model.layers[0], 'scipy_W_res_heads'):
+    first_layer = model.layers[0]
+    for h, mat in enumerate(first_layer.scipy_W_res_heads):
+        rule = getattr(first_layer, '_head_rules', None)
+        title = f"Reservoir Matrix Head {h}"
+        if rule and h < len(rule):
+            title += f" ({rule[h]})"
+        plot_reservoir_matrix(mat, title)
+else:
+    # Fallback if single head
+    plot_reservoir_matrix(model.layers[0].scipy_W_res, "Reservoir Matrix")
+
 print(f"Starting training on {device}...")
 if torch.cuda.is_available():
     print(f"Initial GPU memory: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
@@ -280,7 +373,7 @@ if torch.cuda.is_available():
     print(f"Final GPU memory: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
 
 # Plotting
-os.makedirs('output', exist_ok=True)
+# already ensured earlier
 
 epochs = range(1, EPOCHS + 1)
 
