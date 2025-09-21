@@ -5,6 +5,8 @@ import math
 from scipy.sparse import lil_matrix, eye, csr_matrix, tril
 from scipy.sparse.linalg import eigs
 from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR, LinearLR
+import matplotlib.pyplot as plt
+import os
 
 # --- Step 1: Helper functions for the Reservoir Matrix (with Causal Mask) ---
 
@@ -145,12 +147,12 @@ from tokenizers.pre_tokenizers import Whitespace
 from torch.utils.data import DataLoader
 
 # Hyperparameters
-VOCAB_SIZE = 10000 # Smaller vocab for this toy example
-D_MODEL = 256
+VOCAB_SIZE = 10000
+D_MODEL = 512
 NUM_LAYERS = 3
 MAX_SEQ_LEN = 128
 BATCH_SIZE = 8
-EPOCHS = 10
+EPOCHS = 20
 LR = 0.001
 
 # 1. Load Dataset from WikiText-103
@@ -210,6 +212,12 @@ scheduler = SequentialLR(optimizer, [
 criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
 
 print(f"Starting training on {device}...")
+if torch.cuda.is_available():
+    print(f"Initial GPU memory: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+
+train_losses = []
+learning_rates = []
+
 for epoch in range(EPOCHS):
     model.train()
     total_loss = 0
@@ -229,7 +237,13 @@ for epoch in range(EPOCHS):
         total_loss += loss.item()
     
     scheduler.step()
-    print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {total_loss / len(train_loader):.4f}")
+    epoch_loss = total_loss / len(train_loader)
+    train_losses.append(epoch_loss)
+    learning_rates.append(scheduler.get_last_lr()[0])
+    if torch.cuda.is_available():
+        print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss:.4f}, GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    else:
+        print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss:.4f}")
 
 # Compute validation perplexity
 model.eval()
@@ -243,6 +257,33 @@ with torch.no_grad():
         total_val_loss += loss.item()
 val_perplexity = math.exp(total_val_loss / len(val_loader))
 print(f"Validation Perplexity: {val_perplexity:.4f}")
+if torch.cuda.is_available():
+    print(f"Final GPU memory: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+
+# Plotting
+os.makedirs('output', exist_ok=True)
+
+epochs = range(1, EPOCHS + 1)
+
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(epochs, train_losses, label='Training Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training Loss over Epochs')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(epochs, learning_rates, label='Learning Rate')
+plt.xlabel('Epoch')
+plt.ylabel('Learning Rate')
+plt.title('Learning Rate Schedule')
+plt.legend()
+
+plt.tight_layout()
+plt.savefig('output/training_plots.png')
+print("Plots saved to output/training_plots.png")
 val_loader = DataLoader([{'text': t} for t in val_dataset['text']], batch_size=BATCH_SIZE*5, collate_fn=collate_fn)
 
 # 5. Test Generation
