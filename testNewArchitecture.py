@@ -123,6 +123,8 @@ class ReservoirLM(nn.Module):
         self.layers = nn.ModuleList([
             ReservoirLayer(d_model, max_seq_len, dropout=dropout) for _ in range(num_layers)
         ])
+        # Additional trainable projection after reservoir layers
+        self.additional_proj = nn.Linear(d_model, d_model)
         # NEW: The head now maps to the entire vocabulary
         self.head = nn.Sequential(
             nn.Dropout(dropout),
@@ -134,6 +136,7 @@ class ReservoirLM(nn.Module):
         x = self.pos_encoder(x)
         for layer in self.layers:
             x = layer(x)
+        x = self.additional_proj(x)  # Additional trainable projection
         output = self.head(x)
         return output
 
@@ -152,7 +155,7 @@ D_MODEL = 512
 NUM_LAYERS = 3
 MAX_SEQ_LEN = 128
 BATCH_SIZE = 8
-EPOCHS = 20
+EPOCHS = 1
 LR = 0.001
 
 # 1. Load Dataset from WikiText-103
