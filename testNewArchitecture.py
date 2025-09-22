@@ -133,7 +133,7 @@ class PositionalEncoding(nn.Module):
 
 class ReservoirLayer(nn.Module):
     def __init__(self, d_model, max_seq_len, activation=nn.GELU(), spectral_radius=1.1, dropout=0.1, num_heads=4,
-                 head_rules: list[str] | None = None):
+                 head_rules: list[str] | None = None, use_gating=False, use_head_projs=False, use_hybrid_mode=False, num_attn_heads=4):
         super(ReservoirLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
@@ -162,31 +162,79 @@ class ReservoirLayer(nn.Module):
         )
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
-        # Output projection to combine heads
-        self.out_proj = nn.Linear(d_model * num_heads, d_model)
+        
+        # Feature 1: Gating mechanism
+        self.use_gating = use_gating
+        if self.use_gating:
+            self.gate_proj = nn.Linear(d_model, d_model)
+        
+        # Feature 2: Learnable head projections
+        self.use_head_projs = use_head_projs
+        if self.use_head_projs:
+            self.head_projs = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(self.num_heads)])
+        
+        # Feature 3: Hybrid mode
+        self.use_hybrid_mode = use_hybrid_mode
+        if self.use_hybrid_mode:
+            self.attention = nn.MultiheadAttention(d_model, num_attn_heads, dropout=dropout, batch_first=False)
+            self.out_proj = nn.Linear(d_model * 2, d_model)
+        else:
+            self.out_proj = nn.Linear(d_model * num_heads, d_model)
 
     def forward(self, x):
         seq_len, batch_size, d_model = x.shape
         
-        # Process each head
-        head_outputs = []
-        for head in range(self.num_heads):
-            sub_matrix_scipy = self.scipy_W_res_heads[head][:seq_len, :seq_len]
-            w_res_sub = to_torch_sparse(sub_matrix_scipy).to(x.device)
+        attn_mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
+        
+        if not self.use_hybrid_mode:
+            # Process each head
+            head_outputs = []
+            for head in range(self.num_heads):
+                sub_matrix_scipy = self.scipy_W_res_heads[head][:seq_len, :seq_len]
+                w_res_sub = to_torch_sparse(sub_matrix_scipy).to(x.device)
+                
+                # Apply reservoir for this head
+                res_outputs = []
+                for i in range(batch_size):
+                    head_input = x[:, i, :]
+                    if self.use_head_projs:
+                        head_input = self.head_projs[head](head_input)
+                    res_outputs.append(torch.sparse.mm(w_res_sub, head_input))
+                x_res_head = torch.stack(res_outputs).permute(1, 0, 2)
+                x_res_head = self.activation(x_res_head)
+                head_outputs.append(x_res_head)
             
-            # Apply reservoir for this head
-            res_outputs = []
-            for i in range(batch_size):
-                res_outputs.append(torch.sparse.mm(w_res_sub, x[:, i, :]))
-            x_res = torch.stack(res_outputs).permute(1, 0, 2)
-            x_res = self.activation(x_res)
-            head_outputs.append(x_res)
+            # Concatenate heads
+            x_res = torch.cat(head_outputs, dim=-1)  # (seq_len, batch_size, d_model * num_heads)
+            x_res = self.out_proj(x_res)  # Project back to d_model
+        else:
+            # Hybrid mode: average reservoir heads + attention
+            accumulated_res = 0
+            for head in range(self.num_heads):
+                sub_matrix_scipy = self.scipy_W_res_heads[head][:seq_len, :seq_len]
+                w_res_sub = to_torch_sparse(sub_matrix_scipy).to(x.device)
+                
+                res_outputs = []
+                for i in range(batch_size):
+                    head_input = x[:, i, :]
+                    if self.use_head_projs:
+                        head_input = self.head_projs[head](head_input)
+                    res_outputs.append(torch.sparse.mm(w_res_sub, head_input))
+                x_res_head = torch.stack(res_outputs).permute(1, 0, 2)
+                accumulated_res += x_res_head
+            x_res = self.activation(accumulated_res / self.num_heads)
+            
+            x_attn, _ = self.attention(x, x, x, attn_mask=attn_mask)
+            combined_output = torch.cat([x_res, x_attn], dim=-1)
+            x_res = self.out_proj(combined_output)
         
-        # Concatenate heads
-        x_res = torch.cat(head_outputs, dim=-1)  # (seq_len, batch_size, d_model)
-        x_res = self.out_proj(x_res)  # Project back to d_model
+        # Gating mechanism
+        if self.use_gating:
+            g = torch.sigmoid(self.gate_proj(x))
+            x = self.norm1(x * (1 - g) + x_res * g)
+        else:
+            x = self.norm1(x + x_res)
         
-        x = self.norm1(x + x_res)
         x_mlp = self.mlp(x)
         x = self.norm2(x + x_mlp)
         return x
@@ -195,7 +243,7 @@ class ReservoirLayer(nn.Module):
 
 class ReservoirLM(nn.Module):
     def __init__(self, vocab_size, d_model, num_layers, max_seq_len, dropout=0.1, num_heads=4,
-                 head_rules: list[str] | None = None):
+                 head_rules: list[str] | None = None, use_gating=False, use_head_projs=False, use_hybrid_mode=False, num_attn_heads=4):
         super(ReservoirLM, self).__init__()
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
@@ -203,7 +251,8 @@ class ReservoirLM(nn.Module):
         # self.embedding.weight.requires_grad = False  # Commented out to allow training
         self.pos_encoder = PositionalEncoding(d_model, max_seq_len)
         self.layers = nn.ModuleList([
-            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads, head_rules=head_rules)
+            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads, head_rules=head_rules,
+                           use_gating=use_gating, use_head_projs=use_head_projs, use_hybrid_mode=use_hybrid_mode, num_attn_heads=num_attn_heads)
             for _ in range(num_layers)
         ])
         # Additional trainable projection after reservoir layers
@@ -288,7 +337,9 @@ val_loader = DataLoader([{'text': t} for t in val_dataset['text'][:2000]], batch
 
 # 4. Training Loop
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ReservoirLM(VOCAB_SIZE, D_MODEL, NUM_LAYERS, MAX_SEQ_LEN).to(device)
+model = ReservoirLM(VOCAB_SIZE, D_MODEL, NUM_LAYERS, MAX_SEQ_LEN,
+                    use_gating=True, use_head_projs=True, use_hybrid_mode=True, num_attn_heads=4
+                    ).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 warmup_epochs = int(0.1 * EPOCHS)  # 10% warmup
 scheduler = SequentialLR(optimizer, [

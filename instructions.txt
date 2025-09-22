@@ -1,74 +1,106 @@
-To-Do List: Refactor ReservoirNLP with reservoirpy
-Phase 1: Core Refactoring to reservoirpy
-Setup:
+**Objective:** Modify the `ReservoirLayer` and `ReservoirLM` classes to incorporate three new optional features: a GRU-style gating mechanism, learnable head projections, and a hybrid attention/reservoir mode.
 
-Add reservoirpy to the project's dependencies. Make sure it's installed in the environment.
+#### **Feature 1: Implement Gating Mechanism**
 
-Review the existing config.py and dataset.py to ensure the data loading process remains compatible. The data loaders should produce NumPy arrays, as that's what reservoirpy expects.
+1.  **Modify `ReservoirLayer.__init__`:**
 
-Refactor model.py:
+      * Add a new boolean argument `use_gating=False`.
+      * Inside the `__init__` method, add the following conditional block to create the gating layer:
+        ```python
+        self.use_gating = use_gating
+        if self.use_gating:
+            self.gate_proj = nn.Linear(d_model, d_model)
+        ```
 
-Remove the ESNLanguageModel class completely.
+2.  **Modify `ReservoirLayer.forward`:**
 
-Create a new function or class that builds a reservoirpy model.
+      * Locate the first residual connection line: `x = self.norm1(x + x_res)`.
+      * Replace it with the following conditional logic:
+        ```python
+        if self.use_gating:
+            g = torch.sigmoid(self.gate_proj(x))
+            x = self.norm1(x * (1 - g) + x_res * g)
+        else:
+            x = self.norm1(x + x_res)
+        ```
 
-Define the model architecture using reservoirpy nodes. Start with a simple Echo State Network equivalent:
+-----
 
-reservoirpy.nodes.Reservoir for the reservoir part.
+#### **Feature 2: Implement Learnable Head Projections**
 
-reservoirpy.nodes.Ridge for the readout layer.
+1.  **Modify `ReservoirLayer.__init__`:**
 
-Connect the nodes to form a reservoirpy.Model. The basic structure will be source >> reservoir >> readout, where source is an input node.
+      * Add a new boolean argument `use_head_projs=False`.
+      * Inside the `__init__` method, add the following conditional block to create the projection layers:
+        ```python
+        self.use_head_projs = use_head_projs
+        if self.use_head_projs:
+            self.head_projs = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(self.num_heads)])
+        ```
 
-You will not need the manual weight initialization (_init_reservoir) or the manual forward pass logic anymore. reservoirpy handles this internally.
+2.  **Modify `ReservoirLayer.forward`:**
 
-Since the original model had a trainable embedding layer, you will need to handle this. One approach is to pre-compute the embeddings for your input sequences and feed them directly to the reservoirpy model. Alternatively, you can investigate how to integrate a trainable layer, possibly by creating a custom reservoirpy node that wraps torch.nn.Embedding. For simplicity, start with pre-computed embeddings.
+      * Inside the `for head in range(self.num_heads):` loop, identify the input to the reservoir multiplication. The input is `x`.
+      * Create a new variable `head_input = x`.
+      * Add a conditional block to apply the projection:
+        ```python
+        head_input = x
+        if self.use_head_projs:
+            head_input = self.head_projs[head](head_input)
+        ```
+      * Ensure the rest of the loop uses `head_input` for the sparse matrix multiplication instead of `x`. The line should look like this: `res_outputs.append(torch.sparse.mm(w_res_sub, head_input[:, i, :]))`.
 
-Refactor train.py:
+-----
 
-Remove the existing train and evaluate functions that use the PyTorch training loop, optimizer, and loss functions.
+#### **Feature 3: Implement Hybrid Attention/Reservoir Layer**
 
-Implement a new training function that uses the reservoirpy model's fit() method for offline training.
+1.  **Modify `ReservoirLayer.__init__`:**
 
-The fit() method will take the training inputs (token embeddings) and corresponding target outputs.
+      * Add a new boolean argument `use_hybrid_mode=False`.
+      * Add a new integer argument `num_attn_heads=4`.
+      * Inside the `__init__` method, add the following conditional block. This will initialize a standard PyTorch multi-head attention module.
+        ```python
+        self.use_hybrid_mode = use_hybrid_mode
+        if self.use_hybrid_mode:
+            self.attention = nn.MultiheadAttention(d_model, num_attn_heads, dropout=dropout, batch_first=False)
+            # Adjust the output projection to combine both reservoir and attention outputs
+            self.out_proj = nn.Linear(d_model * 2, d_model)
+        else:
+            # The original projection for reservoir-only heads
+            self.out_proj = nn.Linear(d_model, d_model)
+        ```
 
-Create a new evaluation function that uses the trained reservoirpy model to make predictions on the validation set and computes the loss (e.g., Mean Squared Error using reservoirpy.observables.mse).
+2.  **Modify `ReservoirLayer.forward`:**
 
-Update run_small.py:
+      * At the beginning of the `forward` method, create a causal attention mask. This is crucial for language modeling.
+        ```python
+        attn_mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
+        ```
+      * Wrap the entire existing reservoir head processing logic in `if not self.use_hybrid_mode:`.
+      * Create a new `if self.use_hybrid_mode:` block. Inside it, perform both the reservoir and attention calculations.
+          * **Reservoir part:** The same logic as before (averaging the heads).
+          * **Attention part:** Call the attention layer: `x_attn, _ = self.attention(x, x, x, attn_mask=attn_mask)`.
+          * **Combination:** Concatenate the results: `combined_output = torch.cat([x_res, x_attn], dim=-1)`.
+          * **Projection:** Apply the output projection: `x_res = self.out_proj(combined_output)`.
+      * The final structure of the `forward` method before the first residual connection should look like this:
+        ```python
+        # (Inside ReservoirLayer.forward)
 
-Modify the main script to use the new reservoirpy-based model creation and training functions from the refactored model.py and train.py.
+        # Reservoir processing (simplified logic from before)
+        accumulated_res = 0
+        for head in range(self.num_heads):
+            # ... logic to calculate x_res_head for each head ...
+            accumulated_res += x_res_head
+        x_res = self.activation(accumulated_res / self.num_heads)
 
-Adjust the data preparation step to provide data in the format expected by the reservoirpy model (sequences of NumPy arrays).
+        if self.use_hybrid_mode:
+            attn_mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
+            x_attn, _ = self.attention(x, x, x, attn_mask=attn_mask)
+            combined_output = torch.cat([x_res, x_attn], dim=-1)
+            x_res = self.out_proj(combined_output) # Use the wider out_proj
+        else:
+            x_res = self.out_proj(x_res) # Use the original out_proj
 
-Update the generation/inference loop to use the model.run() method to get predictions.
-
-Phase 2: Experimentation with reservoirpy Features
-Implement Online Learning:
-
-Create a new training script or function that uses the model.train() method instead of model.fit().
-
-Iterate through the training data step-by-step or in small batches, calling model.train() for each chunk. This simulates a streaming data scenario and performs true online learning.
-
-Compare the performance and training speed of the online-trained model against the offline-trained one.
-
-Explore Advanced Architectures:
-
-Deep Reservoir: Modify the model definition in model.py to stack multiple Reservoir nodes (e.g., source >> reservoir1 >> reservoir2 >> readout).
-
-Feedback Connections: Add a feedback loop from the readout node back to the reservoir using reservoirpy.ops.link_feedback(readout, to=reservoir). This is crucial for generative tasks like language modeling.
-
-Parallel Reservoirs: Experiment with having multiple reservoirs in parallel whose outputs are concatenated before being fed to the readout. You can use reservoirpy.nodes.Concat for this.
-
-Investigate Different Node Types:
-
-Go beyond the standard Reservoir and Ridge nodes.
-
-Try alternative readout nodes like reservoirpy.nodes.RLS or reservoirpy.nodes.LMS which are designed for online learning.
-
-Explore other reservoir types if they seem applicable, such as reservoirpy.nodes.NVAR for a simpler, non-linear transformation.
-
-Hyperparameter Optimization:
-
-Look into reservoirpy.hyper for tools to automate the search for optimal hyperparameters (like spectral_radius, leak_rate, input_scaling, etc.).
-
-Set up a hyperparameter search experiment using reservoirpy.hyper.research to find the best configuration for your language modeling task.
+        # ... continue with the gating/residual connection logic ...
+        ```
+      * Finally, update the `ReservoirLM` class `__init__` method to pass these new boolean flags down to the `ReservoirLayer`s.
