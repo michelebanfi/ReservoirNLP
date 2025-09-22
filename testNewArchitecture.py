@@ -2,98 +2,11 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
-from scipy.sparse import lil_matrix, eye, csr_matrix, tril
+from scipy.sparse import lil_matrix, eye, csr_matrix, tril, random
 from scipy.sparse.linalg import eigs
 from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR, LinearLR
 import matplotlib.pyplot as plt
 import os
-
-# --- Step 1: Helper functions for the Reservoir Matrix (with Causal Mask) ---
-
-def _base_pattern_by_rule(rule: str, base_dim: int | None = None, density: float = 0.5) -> np.ndarray:
-    """Return a base binary pattern according to the requested rule.
-    Rules:
-      - 'cross8': 3x3 with hole center, 8 ones (original default)
-      - 'ring4': 3x3 ring with 4 ones
-      - 'checker': 3x3 checkerboard-like
-      - 'diag': diagonals set to 1
-      - 'sierpinski': 2x2 [[1,1],[1,0]]
-      - 'random': random base_dim x base_dim with given density
-    """
-    rule = (rule or 'cross8').lower()
-    if rule == 'sierpinski':
-        return np.array([[1, 1], [1, 0]], dtype=int)
-    if rule == 'cross8':
-        return np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=int)
-    if rule == 'ring4':
-        return np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=int)
-    if rule == 'checker':
-        return np.array([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=int)
-    if rule == 'diag':
-        n = base_dim or 3
-        eye1 = np.eye(n, dtype=int)
-        eye2 = np.fliplr(eye1)
-        patt = np.clip(eye1 + eye2, 0, 1)
-        # Optional: zero center for odd n
-        if n % 2 == 1:
-            patt[n//2, n//2] = 0
-        return patt
-    if rule == 'random':
-        n = base_dim or 3
-        rng = np.random.default_rng(42)
-        patt = (rng.random((n, n)) < density).astype(int)
-        # Ensure not all-zero
-        if patt.sum() == 0:
-            patt[rng.integers(0, n), rng.integers(0, n)] = 1
-        # Encourage a hole in the center if odd
-        if n % 2 == 1:
-            patt[n//2, n//2] = 0
-        return patt
-    # Fallback
-    return np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=int)
-
-
-def generate_fractal_matrix(
-    dim: int,
-    base_pattern: np.ndarray | None = None,
-    causal: bool = False,
-    *,
-    rule: str = 'cross8',
-    base_dim: int | None = None,
-    density: float = 0.5,
-) -> csr_matrix:
-    """Generates a sparse matrix with a recursive fractal pattern, optionally causal.
-    You can either pass a concrete base_pattern, or select a `rule`.
-    """
-    if base_pattern is None:
-        base_pattern = _base_pattern_by_rule(rule, base_dim=base_dim, density=density)
-
-    base_dim_local = base_pattern.shape[0]
-    if dim == 1:
-        return eye(1, format='csr')
-
-    power = math.ceil(math.log(dim, base_dim_local))
-    actual_dim = base_dim_local ** power
-
-    # Recursive build
-    sub_dim = actual_dim // base_dim_local
-    smaller_matrix = generate_fractal_matrix(
-        sub_dim, base_pattern=base_pattern, causal=causal, rule=rule, base_dim=base_dim, density=density
-    )
-
-    new_matrix = lil_matrix((actual_dim, actual_dim))
-    for i in range(base_dim_local):
-        for j in range(base_dim_local):
-            if base_pattern[i, j] == 1:
-                start_row, end_row = i * sub_dim, (i + 1) * sub_dim
-                start_col, end_col = j * sub_dim, (j + 1) * sub_dim
-                new_matrix[start_row:end_row, start_col:end_col] = smaller_matrix
-
-    # Apply causal mask if requested
-    if causal:
-        new_matrix = tril(new_matrix, k=-1)  # strictly lower triangular
-
-    return new_matrix.tocsr()[:dim, :dim]
 
 def normalize_spectral_radius(matrix, target_radius=0.99):
     """Normalizes the matrix to have a specific spectral radius."""
@@ -133,21 +46,17 @@ class PositionalEncoding(nn.Module):
 
 class ReservoirLayer(nn.Module):
     def __init__(self, d_model, max_seq_len, activation=nn.GELU(), spectral_radius=1.1, dropout=0.1, num_heads=4,
-                 head_rules: list[str] | None = None, use_gating=False, use_head_projs=False, use_hybrid_mode=False, num_attn_heads=4):
+                 use_gating=False, use_head_projs=False, use_hybrid_mode=False, num_attn_heads=4):
         super(ReservoirLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
         self.head_dim = d_model // num_heads
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         
-        # Generate separate fractal matrices for each head (allow different rules per head)
-        default_rules = ['cross8', 'ring4', 'checker', 'diag']
-        if head_rules is None:
-            head_rules = [default_rules[i % len(default_rules)] for i in range(num_heads)]
-        self._head_rules = head_rules
+        # Generate separate random sparse matrices for each head (causal)
         self.scipy_W_res_heads = [
             normalize_spectral_radius(
-                generate_fractal_matrix(max_seq_len, causal=True, rule=head_rules[i % len(head_rules)]), spectral_radius
+                tril(random(max_seq_len, max_seq_len, density=0.1, format='csr', random_state=42 + i), k=-1), spectral_radius
             )
             for i in range(num_heads)
         ]
@@ -243,7 +152,7 @@ class ReservoirLayer(nn.Module):
 
 class ReservoirLM(nn.Module):
     def __init__(self, vocab_size, d_model, num_layers, max_seq_len, dropout=0.1, num_heads=4,
-                 head_rules: list[str] | None = None, use_gating=False, use_head_projs=False, use_hybrid_mode=False, num_attn_heads=4):
+                 use_gating=False, use_head_projs=False, use_hybrid_mode=False, num_attn_heads=4):
         super(ReservoirLM, self).__init__()
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
@@ -251,7 +160,7 @@ class ReservoirLM(nn.Module):
         # self.embedding.weight.requires_grad = False  # Commented out to allow training
         self.pos_encoder = PositionalEncoding(d_model, max_seq_len)
         self.layers = nn.ModuleList([
-            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads, head_rules=head_rules,
+            ReservoirLayer(d_model, max_seq_len, dropout=dropout, num_heads=num_heads,
                            use_gating=use_gating, use_head_projs=use_head_projs, use_hybrid_mode=use_hybrid_mode, num_attn_heads=num_attn_heads)
             for _ in range(num_layers)
         ])
@@ -283,11 +192,12 @@ from torch.utils.data import DataLoader
 
 # Hyperparameters
 VOCAB_SIZE = 10000
-D_MODEL = 512
-NUM_LAYERS = 3
+D_MODEL = 1024
+NUM_LAYERS = 4
 MAX_SEQ_LEN = 512
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 EPOCHS = 10
+HEADS = 4
 LR = 0.001
 
 # 1. Load Dataset from WikiText-103
@@ -338,7 +248,7 @@ val_loader = DataLoader([{'text': t} for t in val_dataset['text'][:2000]], batch
 # 4. Training Loop
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = ReservoirLM(VOCAB_SIZE, D_MODEL, NUM_LAYERS, MAX_SEQ_LEN,
-                    use_gating=True, use_head_projs=True, use_hybrid_mode=True, num_attn_heads=4
+                    use_gating=True, use_head_projs=True, use_hybrid_mode=True, num_attn_heads=HEADS
                     ).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 warmup_epochs = int(0.1 * EPOCHS)  # 10% warmup
@@ -365,10 +275,7 @@ os.makedirs('output', exist_ok=True)
 if hasattr(model.layers[0], 'scipy_W_res_heads'):
     first_layer = model.layers[0]
     for h, mat in enumerate(first_layer.scipy_W_res_heads):
-        rule = getattr(first_layer, '_head_rules', None)
         title = f"Reservoir Matrix Head {h}"
-        if rule and h < len(rule):
-            title += f" ({rule[h]})"
         plot_reservoir_matrix(mat, title)
 else:
     # Fallback if single head
