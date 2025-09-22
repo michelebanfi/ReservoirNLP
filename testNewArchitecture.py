@@ -56,7 +56,7 @@ class ReservoirLayer(nn.Module):
         # Generate separate random sparse matrices for each head (causal)
         self.scipy_W_res_heads = [
             normalize_spectral_radius(
-                tril(random(max_seq_len, max_seq_len, density=0.1, format='csr', random_state=42 + i), k=-1), spectral_radius
+                tril(random(max_seq_len, max_seq_len, density=0.1, format='csr', random_state=42 + i), k=-1).tocsr(), spectral_radius
             )
             for i in range(num_heads)
         ]
