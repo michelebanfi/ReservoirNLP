@@ -12,13 +12,13 @@ from tokenizers.pre_tokenizers import Whitespace
 from tqdm import tqdm
 
 # --- Configuration ---
-VOCAB_SIZE = 2000  # Reduced from 4000
-MAX_SEQ_LEN = 16   # Reduced from 32
-D_MODEL = 32       # Reduced from 64
-NUM_LAYERS = 1     # Reduced from 2
-NUM_HEADS = 2
-BATCH_SIZE = 16    # Reduced from 32
-EPOCHS = 1
+VOCAB_SIZE = 4000  # Reduced from 4000
+MAX_SEQ_LEN = 128   # Reduced from 32
+D_MODEL = 128       # Reduced from 64
+NUM_LAYERS = 2     # Reduced from 2
+NUM_HEADS = 4
+BATCH_SIZE = 32   # Reduced from 32
+EPOCHS = 5
 LR = 0.001         # Slightly increased for faster convergence
 NUM_PREDICTORS = 2
 GUMBEL_TAU = 1.0 # Temperature for Gumbel-Softmax
@@ -88,7 +88,7 @@ class PredictorAggregatorLM(nn.Module):
 # --- Data Preparation (Same as before) ---
 print("## Step 0: Preparing Dataset and Tokenizer ##")
 # Using a much smaller portion for testing (first 1000 samples)
-full_dataset = load_dataset("roneneldan/TinyStories", split="train[:1000]")
+full_dataset = load_dataset("roneneldan/TinyStories", split="train[:5000]")
 tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
 tokenizer.pre_tokenizer = Whitespace()
 trainer = BpeTrainer(vocab_size=VOCAB_SIZE, special_tokens=["[UNK]", "[PAD]"])
@@ -117,6 +117,9 @@ print("\n## Starting End-to-End Training ##")
 model = PredictorAggregatorLM(VOCAB_SIZE, D_MODEL, NUM_HEADS, NUM_LAYERS, MAX_SEQ_LEN, NUM_PREDICTORS).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
+
+# Add cosine annealing scheduler
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=LR*0.1)
 
 print(f"Training on {len(loader)} batches")
 print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -148,7 +151,11 @@ for epoch in range(EPOCHS):
             print(f"Batch {batch_idx}, Loss: {loss.item():.4f}")
     
     avg_loss = epoch_loss / num_batches
-    print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}")
+    current_lr = scheduler.get_last_lr()[0]
+    print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}, LR: {current_lr:.6f}")
+    
+    # Step the scheduler
+    scheduler.step()
 
 torch.save(model.state_dict(), "models/end_to_end_model.pt")
 print("End-to-end model trained and saved successfully!")
