@@ -41,9 +41,9 @@ LOCAL_CONFIG = TrainConfig(
     MAX_SEQ_LEN=32,
     D_MODEL=128,
     NUM_LAYERS=2,
-    NUM_HEADS=4,
+    NUM_HEADS=2,
     BATCH_SIZE=8,
-    EPOCHS=3,
+    EPOCHS=1,
     LR=1e-3,
     WEIGHT_DECAY=1e-4,
     NUM_PREDICTORS=2,
@@ -59,10 +59,10 @@ FULL_CONFIG = TrainConfig(
     VOCAB_SIZE=16000,
     MAX_SEQ_LEN=128,
     D_MODEL=256,
-    NUM_LAYERS=4,
-    NUM_HEADS=8,
+    NUM_LAYERS=2,
+    NUM_HEADS=4,
     BATCH_SIZE=16,
-    EPOCHS=6,
+    EPOCHS=10,
     LR=5e-4,
     WEIGHT_DECAY=0.01,
     NUM_PREDICTORS=3,
@@ -150,17 +150,30 @@ class PredictorAggregatorLM(nn.Module):
         self.aggregator = DiverseTransformerLM(vocab_size, d_model, num_heads, num_layers, 
                                              aggregator_max_len, variant='standard')
         
-        # 3. Learnable gating to fuse predictors per time step
-        # Produces a scalar score per (predictor, time) to softmax across predictors
+        # 3. Improved gating mechanism with attention-like scoring
         self.predictor_gate = nn.Sequential(
             nn.Linear(d_model, d_model // 2),
             nn.GELU(),
+            nn.LayerNorm(d_model // 2),  # Added normalization for stability
             nn.Linear(d_model // 2, 1)
         )
+        
         # Normalizations to stabilize scales
         self.pre_gate_norm = nn.LayerNorm(d_model)
         self.post_fuse_norm = nn.LayerNorm(d_model)
         self.gate_dropout = nn.Dropout(0.1)
+        
+        # Added temperature parameter for gating
+        self.gate_temperature = nn.Parameter(torch.ones(1) * 1.0)
+        
+        # 4. Add additional MLP for refining aggregated embeddings
+        self.refine_mlp = nn.Sequential(
+            nn.Linear(d_model, d_model * 2),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(d_model * 2, d_model),
+            nn.LayerNorm(d_model)
+        )
 
     def forward(self, src, gumbel_tau=1.0, return_aux_info=False):
         monologue_embeddings = []
@@ -178,31 +191,34 @@ class PredictorAggregatorLM(nn.Module):
             batch_size, seq_len, vocab_size = predictor_logits.shape
             predictor_outputs.append(predictor_logits)
             
-            # ** THE KEY STEP **
-            # Use Gumbel-Softmax with dynamic temperature
-            # Use soft samples during training for smoother gradients; hard at eval
+            # IMPROVED GUMBEL SOFTMAX: Gradually transition from soft to harder samples
+            hard = not self.training or gumbel_tau < 0.8  # Use hard samples at lower temperatures
+            
             differentiable_one_hot = F.gumbel_softmax(
-                predictor_logits, tau=gumbel_tau, hard=not self.training
+                predictor_logits, tau=gumbel_tau, hard=hard
             )
             
             # Convert the one-hot vector into a differentiable embedding
-            # This is a differentiable equivalent of an embedding lookup
             soft_embeddings = torch.matmul(differentiable_one_hot, self.aggregator.embedding.weight)
             monologue_embeddings.append(soft_embeddings)
             
-        # Fuse predictor embeddings per time step via learnable gating across predictors
-        # monologue_embeddings: list of [B, S, D] -> stack to [B, P, S, D]
+        # Fuse predictor embeddings with improved gating
         monologue_stack = torch.stack(monologue_embeddings, dim=1)
-        # Normalize before gating to control scale
         monologue_stack = self.pre_gate_norm(monologue_stack)
-        # Compute scores per (B,P,S,1)
+        
+        # Improved gating scores with temperature-controlled sharpness
         gate_scores = self.predictor_gate(monologue_stack)
-        # Cap gate scores to avoid softmax overflow
-        gate_scores = torch.tanh(gate_scores) * 5.0
+        # Use learned temperature parameter for adaptive sharpness
+        gate_scores = gate_scores / (self.gate_temperature + 0.1)  # Add 0.1 for numerical stability
         gate_weights = torch.softmax(gate_scores, dim=1)  # softmax across predictors
         gate_weights = self.gate_dropout(gate_weights)
+        
         # Weighted sum across predictor dim -> [B, S, D]
         aggregator_input_embeddings = (gate_weights * monologue_stack).sum(dim=1)
+        
+        # NEW: Refine aggregated embeddings with MLP for better representation
+        aggregator_input_embeddings = self.refine_mlp(aggregator_input_embeddings)
+        
         # Post-fusion normalization
         aggregator_input_embeddings = self.post_fuse_norm(aggregator_input_embeddings)
         
@@ -214,100 +230,165 @@ class PredictorAggregatorLM(nn.Module):
         final_logits = self.aggregator.head(aggregator_output)
         
         if return_aux_info:
-            return final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs
+            return final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs, gate_weights
         return final_logits
     
-    def compute_auxiliary_losses(self, predictor_outputs, monologue_embeddings, targets, raw_predictor_outputs):
+    def compute_auxiliary_losses(self, predictor_outputs, monologue_embeddings, targets, raw_predictor_outputs, gate_weights=None):
         """
-        Improved auxiliary losses with better numerical stability
+        Completely rewritten auxiliary losses for better training signal
         """
         aux_losses = {}
         device = predictor_outputs[0].device if predictor_outputs else targets.device
         eps = 1e-8
         
-        # 1. ENHANCED DIVERSITY LOSS: Multiple measures of diversity
+        # 1. IMPROVED DIVERSITY LOSS: Encourage diversity among predictors
         if len(predictor_outputs) > 1:
-            diversity_loss = 0
-            total_pairs = 0
+            diversity_loss = 0.0
+            valid_pairs = 0
             
             for i in range(len(predictor_outputs)):
                 for j in range(i + 1, len(predictor_outputs)):
-                    # L2 distance between probability distributions (better than cosine)
-                    prob_i = F.softmax(torch.clamp(predictor_outputs[i], -20.0, 20.0), dim=-1)
-                    prob_j = F.softmax(torch.clamp(predictor_outputs[j], -20.0, 20.0), dim=-1)
+                    # Get probability distributions
+                    probs_i = F.softmax(predictor_outputs[i].detach(), dim=-1)
+                    probs_j = F.softmax(predictor_outputs[j], dim=-1)
                     
-                    # Jensen-Shannon divergence for better diversity measure
-                    m = torch.clamp(0.5 * (prob_i + prob_j), eps, 1.0)
-                    log_pi = torch.log(torch.clamp(prob_i, eps, 1.0))
-                    log_pj = torch.log(torch.clamp(prob_j, eps, 1.0))
-                    log_m = torch.log(m)
-                    # KL terms
-                    kl_im = (prob_i * (log_pi - log_m)).sum(-1)
-                    kl_jm = (prob_j * (log_pj - log_m)).sum(-1)
-                    js_div = 0.5 * kl_im.mean() + 0.5 * kl_jm.mean()
+                    # KL divergence (asymmetric) from j to i
+                    # We want j to be different from i (i is detached as reference)
+                    log_probs_j = torch.log(torch.clamp(probs_j, min=eps))
+                    kl_div = F.kl_div(log_probs_j, probs_i, reduction='none', log_target=False)
                     
-                    # We want to MAXIMIZE diversity, so minimize negative JS divergence
-                    diversity_loss += -js_div
-                    total_pairs += 1
+                    # Focus diversity on tokens where the target isn't padding
+                    non_pad_mask = (targets != pad_token_id).unsqueeze(-1).float()
+                    masked_kl = (kl_div * non_pad_mask).sum(-1).mean()
+                    
+                    # We want to MINIMIZE negative KL (MAXIMIZE KL)
+                    # Smaller negative value = larger positive KL = more diversity
+                    diversity_loss -= masked_kl
+                    valid_pairs += 1
             
-            aux_losses['diversity'] = diversity_loss / total_pairs if total_pairs > 0 else torch.tensor(0.0, device=device)
+            if valid_pairs > 0:
+                # Normalize and scale
+                diversity_loss = diversity_loss / valid_pairs
+                # Add regularization to prevent extreme values
+                aux_losses['diversity'] = torch.tanh(diversity_loss) * 2.0
+            else:
+                aux_losses['diversity'] = torch.tensor(0.0, device=device)
         else:
             aux_losses['diversity'] = torch.tensor(0.0, device=device)
         
-        # 2. IMPROVED SMOOTHNESS LOSS: Temporal consistency
-        smoothness_loss = 0
+        # 2. FIXED SMOOTHNESS LOSS: Temporal consistency in predictions
+        smoothness_loss = 0.0
+        valid_sequences = 0
+        
         for emb in monologue_embeddings:
             if emb.shape[1] > 1:
-                # Cosine similarity between consecutive embeddings (should be high)
-                curr_emb = emb[:, :-1, :].reshape(-1, emb.shape[-1])
-                next_emb = emb[:, 1:, :].reshape(-1, emb.shape[-1])
+                # Get embeddings for consecutive positions
+                curr_emb = emb[:, :-1, :]
+                next_emb = emb[:, 1:, :]
                 
-                cos_sim = F.cosine_similarity(curr_emb, next_emb, dim=-1)
-                # Penalize low similarity (we want smooth transitions)
-                smoothness_loss += (1 - cos_sim).mean()
+                # Normalize embeddings for stable cosine similarity
+                curr_norm = F.normalize(curr_emb, p=2, dim=-1)
+                next_norm = F.normalize(next_emb, p=2, dim=-1)
+                
+                # Calculate cosine similarity (should be high for smoothness)
+                cos_sim = (curr_norm * next_norm).sum(dim=-1)
+                
+                # Create mask for non-padding tokens
+                seq_mask = (targets != pad_token_id)[:, :-1] & (targets != pad_token_id)[:, 1:]
+                
+                # Apply mask and calculate loss
+                if seq_mask.sum() > 0:
+                    # We want high similarity (close to 1), so penalize 1-similarity
+                    masked_sim = cos_sim[seq_mask]
+                    smoothness_loss += (1.0 - masked_sim).mean()
+                    valid_sequences += 1
         
-        aux_losses['smoothness'] = smoothness_loss / len(monologue_embeddings) if len(monologue_embeddings) > 0 else torch.tensor(0.0, device=device)
+        if valid_sequences > 0:
+            aux_losses['smoothness'] = smoothness_loss / valid_sequences
+        else:
+            aux_losses['smoothness'] = torch.tensor(0.0, device=device)
         
-        # 3. CONSISTENCY LOSS: Predictors should agree on confident predictions
+        # 3. IMPROVED CONSISTENCY LOSS: Predictors should agree on confident predictions
         if len(raw_predictor_outputs) > 1:
-            consistency_loss = 0
-            for i in range(len(raw_predictor_outputs)):
-                for j in range(i + 1, len(raw_predictor_outputs)):
-                    # Get confidence masks (high-confidence predictions)
-                    conf_i = F.softmax(torch.clamp(raw_predictor_outputs[i], -20.0, 20.0), dim=-1).max(dim=-1)[0]
-                    conf_j = F.softmax(torch.clamp(raw_predictor_outputs[j], -20.0, 20.0), dim=-1).max(dim=-1)[0]
-                    
-                    # Where both are confident, they should agree
-                    high_conf_mask = (conf_i > 0.7) & (conf_j > 0.7)
-                    
-                    if high_conf_mask.sum() > 0:
-                        pred_i = raw_predictor_outputs[i].argmax(dim=-1)
-                        pred_j = raw_predictor_outputs[j].argmax(dim=-1)
-                        
-                        # Agreement loss (should be low when predictions match)
-                        agreement = (pred_i == pred_j).float()
-                        consistency_loss += (1 - agreement[high_conf_mask]).mean()
+            consistency_loss = 0.0
+            valid_comparisons = 0
             
-            aux_losses['consistency'] = consistency_loss / (len(raw_predictor_outputs) * (len(raw_predictor_outputs) - 1) / 2) if len(raw_predictor_outputs) > 1 and consistency_loss > 0 else torch.tensor(0.0, device=device)
+            # Get predictions from each model
+            pred_indices = [logits.argmax(dim=-1) for logits in raw_predictor_outputs]
+            pred_probs = [F.softmax(logits, dim=-1) for logits in raw_predictor_outputs]
+            
+            # Get confidence scores for each prediction
+            confidences = [probs.gather(-1, indices.unsqueeze(-1)).squeeze(-1) 
+                         for probs, indices in zip(pred_probs, pred_indices)]
+            
+            # Create mask for non-padding positions
+            non_pad_mask = (targets != pad_token_id)
+            
+            # For each pair of predictors
+            for i in range(len(pred_indices)):
+                for j in range(i+1, len(pred_indices)):
+                    # Find positions where both are confident (>0.6)
+                    joint_conf_mask = (confidences[i] > 0.6) & (confidences[j] > 0.6) & non_pad_mask
+                    
+                    if joint_conf_mask.sum() > 0:
+                        # Check agreement on these positions
+                        agreement = (pred_indices[i][joint_conf_mask] == pred_indices[j][joint_conf_mask]).float()
+                        consistency_loss += (1.0 - agreement.mean())
+                        valid_comparisons += 1
+            
+            if valid_comparisons > 0:
+                aux_losses['consistency'] = consistency_loss / valid_comparisons
+            else:
+                aux_losses['consistency'] = torch.tensor(0.0, device=device)
         else:
             aux_losses['consistency'] = torch.tensor(0.0, device=device)
         
-        # 4. INFORMATION PRESERVATION (improved)
-        info_loss = 0
+        # 4. BETTER INFORMATION LOSS: Balancing entropy across sequence positions
+        info_loss = 0.0
+        valid_predictors = 0
+        
         for pred_logits in raw_predictor_outputs:
-            # Encourage high confidence where it makes sense, but not everywhere
-            probs = F.softmax(torch.clamp(pred_logits, -20.0, 20.0), dim=-1)
-            entropy = -(probs * torch.log(torch.clamp(probs, eps, 1.0))).sum(dim=-1)
+            # Calculate token distribution entropy
+            probs = F.softmax(pred_logits, dim=-1)
+            entropy = -(probs * torch.log(torch.clamp(probs, min=eps))).sum(dim=-1)
             
-            # Target entropy: higher at beginning (more uncertainty), lower at end
+            # Create position-dependent target entropy (higher at beginning, lower at end)
             seq_len = entropy.shape[1]
+            # More nuanced entropy targets - starts high, gradually reduces
             target_entropy = torch.linspace(2.0, 0.5, seq_len).to(entropy.device)
             
-            # L2 loss between actual and target entropy
-            entropy_loss = F.mse_loss(entropy.mean(0), target_entropy)
-            info_loss += entropy_loss
+            # Mask for non-padding positions
+            seq_mask = (targets != pad_token_id)
+            masked_entropy = entropy * seq_mask.float()
+            
+            # Average across batch for each position
+            avg_entropy_per_pos = masked_entropy.sum(0) / (seq_mask.sum(0) + eps)
+            
+            # Compare with target entropy
+            pos_info_loss = F.mse_loss(avg_entropy_per_pos, target_entropy)
+            info_loss += pos_info_loss
+            valid_predictors += 1
         
-        aux_losses['information'] = info_loss / len(raw_predictor_outputs) if len(raw_predictor_outputs) > 0 else torch.tensor(0.0, device=device)
+        if valid_predictors > 0:
+            aux_losses['information'] = info_loss / valid_predictors
+        else:
+            aux_losses['information'] = torch.tensor(0.0, device=device)
+        
+        # 5. NEW: Gate diversity loss - encourage different predictors to be selected
+        if gate_weights is not None:
+            # Average gate weights across batch and sequence
+            avg_gate = gate_weights.mean(dim=(0,2))  # Shape: [num_predictors]
+            
+            # Compute entropy of the average gate distribution
+            # Higher entropy = more diverse usage of predictors
+            gate_entropy = -(avg_gate * torch.log(torch.clamp(avg_gate, min=eps))).sum()
+            
+            # Maximum possible entropy is log(num_predictors)
+            max_entropy = math.log(self.num_predictors)
+            
+            # Normalize and invert (we want to maximize entropy)
+            gate_diversity_loss = 1.0 - (gate_entropy / max_entropy)
+            aux_losses['gate_diversity'] = gate_diversity_loss
         
         return aux_losses
 
@@ -345,22 +426,46 @@ os.makedirs("models", exist_ok=True)
 # --- Unified Training Loop ---
 print("\n## Starting End-to-End Training ##")
 model = PredictorAggregatorLM(VOCAB_SIZE, D_MODEL, NUM_HEADS, NUM_LAYERS, MAX_SEQ_LEN, NUM_PREDICTORS).to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)  # Use AdamW for weight decay
-criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 
-# Add cosine annealing scheduler (will start after warmup)
+# Use a better loss function that handles padding properly
+criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id, reduction='mean', label_smoothing=0.1)  # Added label smoothing
+
+# Add cosine annealing scheduler with longer cycle
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS-WARMUP_EPOCHS, eta_min=LR*0.01)
 
 def get_current_gumbel_tau(epoch, total_epochs):
-    """Linearly anneal Gumbel temperature from start to end"""
-    progress = epoch / total_epochs
-    return GUMBEL_TAU_START * (1 - progress) + GUMBEL_TAU_END * progress
+    """Improved annealing schedule with slower decay"""
+    progress = min(epoch / max(1, total_epochs - WARMUP_EPOCHS), 1.0)
+    # Slower annealing schedule - stay at higher temperatures longer
+    return GUMBEL_TAU_START * (1 - progress**2) + GUMBEL_TAU_END * progress**2
 
 def get_warmup_lr(epoch, base_lr, warmup_epochs):
     """Linear warmup for learning rate"""
     if epoch < warmup_epochs:
         return base_lr * (epoch + 1) / warmup_epochs
     return base_lr
+
+# Curriculum learning - start with shorter sequences
+def get_curriculum_mask(inputs, targets, epoch, total_epochs):
+    """Create a curriculum mask that focuses on progressively longer sequences"""
+    if epoch < total_epochs // 3:
+        # First third of training: focus on first 1/3 of sequence
+        seq_len = inputs.size(1)
+        curriculum_len = max(seq_len // 3, 1)
+        mask = torch.zeros_like(targets, dtype=torch.bool)
+        mask[:, :curriculum_len] = True
+        return mask
+    elif epoch < 2 * (total_epochs // 3):
+        # Second third: focus on first 2/3 of sequence
+        seq_len = inputs.size(1)
+        curriculum_len = max(2 * (seq_len // 3), 1)
+        mask = torch.zeros_like(targets, dtype=torch.bool)
+        mask[:, :curriculum_len] = True
+        return mask
+    else:
+        # Final third: use full sequence
+        return torch.ones_like(targets, dtype=torch.bool)
 
 print(f"Training on {len(loader)} batches")
 print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -376,15 +481,23 @@ else:
 train_losses = []
 learning_rates = []
 gumbel_taus = []
-aux_losses_history = {'diversity': [], 'smoothness': [], 'information': [], 'consistency': []}
+aux_losses_history = {
+    'diversity': [], 'smoothness': [], 'information': [], 'consistency': [], 'gate_diversity': []
+}
+
+# Add gradient accumulation for stability
+GRAD_ACCUM_STEPS = 4 if not LOCAL_TESTING else 1
 
 for epoch in range(EPOCHS):
     epoch_loss = 0.0
-    epoch_aux_losses = {'diversity': 0.0, 'smoothness': 0.0, 'information': 0.0, 'consistency': 0.0}
+    epoch_aux_losses = {
+        'diversity': 0.0, 'smoothness': 0.0, 'information': 0.0, 
+        'consistency': 0.0, 'gate_diversity': 0.0
+    }
     num_batches = 0
     skipped_batches = 0
     
-    # Get current Gumbel temperature (slower annealing)
+    # Get current Gumbel temperature (improved annealing)
     current_tau = get_current_gumbel_tau(epoch, EPOCHS)
     gumbel_taus.append(current_tau)
     
@@ -394,13 +507,20 @@ for epoch in range(EPOCHS):
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr
     
+    # Set model to training mode
+    model.train()
+    
+    # Reset gradients at the beginning of each epoch
+    optimizer.zero_grad(set_to_none=True)
+    
     for batch_idx, (inputs, targets) in enumerate(tqdm(loader, desc=f"Epoch {epoch+1}/{EPOCHS}")):
         inputs, targets = inputs.to(device), targets.to(device)
         
-        optimizer.zero_grad()
+        # Get curriculum mask for this epoch
+        curriculum_mask = get_curriculum_mask(inputs, targets, epoch, EPOCHS).to(device)
         
         # Forward pass with auxiliary information
-        final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs = model(
+        final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs, gate_weights = model(
             inputs, gumbel_tau=current_tau, return_aux_info=True
         )
         
@@ -410,68 +530,71 @@ for epoch in range(EPOCHS):
             skipped_batches += 1
             continue
         
-        # Main loss
-        main_loss = criterion(final_logits[:, :targets.shape[1], :].reshape(-1, VOCAB_SIZE), targets.reshape(-1))
+        # Apply curriculum mask to focus on specific parts of sequence
+        masked_targets = targets.clone()
+        masked_targets[~curriculum_mask] = pad_token_id  # Treat non-curriculum positions as padding
         
-        # If main loss is negative or non-finite, diagnose
-        if (not torch.isfinite(main_loss)) or main_loss.item() < 0:
-            with torch.no_grad():
-                logits_slice = final_logits[:, :targets.shape[1], :]
-                log_probs = F.log_softmax(logits_slice, dim=-1)
-                gathered = log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
-                manual_ce = (-gathered[torch.isfinite(gathered)]).mean().item() if torch.isfinite(gathered).any() else float('nan')
-                print(f"Abnormal main loss at batch {batch_idx}: loss={main_loss.item():.6f}, manualCE={manual_ce:.6f}")
-                print(f"  logits stats: min={logits_slice.min().item():.3e}, max={logits_slice.max().item():.3e}, mean={logits_slice.mean().item():.3e}")
-                print(f"  targets stats: min={targets.min().item()}, max={targets.max().item()}, pad_count={(targets==pad_token_id).sum().item()}")
-            if (not torch.isfinite(main_loss)):
-                skipped_batches += 1
-                continue
+        # Main loss - CrossEntropyLoss handles flattening internally
+        main_loss = criterion(final_logits.view(-1, VOCAB_SIZE), masked_targets.view(-1))
         
         # Auxiliary losses with improved computation
-        aux_losses = model.compute_auxiliary_losses(predictor_outputs, monologue_embeddings, targets, raw_predictor_outputs)
+        aux_losses = model.compute_auxiliary_losses(
+            predictor_outputs, monologue_embeddings, masked_targets, 
+            raw_predictor_outputs, gate_weights
+        )
+        
+        # Dynamic weighting of auxiliary losses based on training progress
+        # Start with low weights and gradually increase
+        progress = epoch / EPOCHS
+        diversity_weight = DIVERSITY_LOSS_WEIGHT * min(1.0, progress * 2)  # Ramp up over first half
+        consistency_weight = CONSISTENCY_LOSS_WEIGHT * min(1.0, progress * 3)  # Ramp up over first third
         
         # Combine losses with adaptive weights
         total_loss = main_loss
-        total_loss += DIVERSITY_LOSS_WEIGHT * aux_losses['diversity']
-        total_loss += 0.1 * aux_losses['smoothness']  # Lower weight for smoothness
-        total_loss += 0.05 * aux_losses['information']  # Lower weight for information
-        total_loss += CONSISTENCY_LOSS_WEIGHT * aux_losses['consistency']  # New consistency loss
+        total_loss += diversity_weight * aux_losses.get('diversity', 0.0)
+        total_loss += 0.1 * aux_losses.get('smoothness', 0.0)
+        total_loss += 0.05 * aux_losses.get('information', 0.0)
+        total_loss += consistency_weight * aux_losses.get('consistency', 0.0)
+        total_loss += 0.1 * aux_losses.get('gate_diversity', 0.0)  # Add new gate diversity loss
+        
+        # Scale loss for gradient accumulation
+        total_loss = total_loss / GRAD_ACCUM_STEPS
         
         # Check for NaN/Inf
-        if (not torch.isfinite(total_loss)):
+        if not torch.isfinite(total_loss):
             print(f"NaN/Inf detected in loss at batch {batch_idx}; skipping batch")
             skipped_batches += 1
             continue
         
+        # Backward pass with gradient accumulation
         total_loss.backward()
         
-        # Gradient clipping and non-finite grad guard
-        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        if not torch.isfinite(torch.tensor(float(total_norm))):
-            print(f"Non-finite grad norm ({total_norm}) at batch {batch_idx}; skipping optimizer.step")
+        # Only step optimizer and zero gradients after accumulation
+        if (batch_idx + 1) % GRAD_ACCUM_STEPS == 0 or (batch_idx + 1) == len(loader):
+            # Gradient clipping
+            total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            if not torch.isfinite(torch.tensor(float(total_norm))):
+                print(f"Non-finite grad norm ({total_norm}) at batch {batch_idx}; skipping optimizer.step")
+                optimizer.zero_grad(set_to_none=True)
+                skipped_batches += 1
+                continue
+            
+            optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-            skipped_batches += 1
-            continue
         
-        optimizer.step()
-        
-        epoch_loss += main_loss.item()
+        # Track losses
+        epoch_loss += main_loss.item() * GRAD_ACCUM_STEPS  # Adjust for gradient accumulation
         num_batches += 1
         
-        # Track auxiliary losses (robust handling of tensors vs scalars)
+        # Track auxiliary losses
         for loss_name, loss_value in aux_losses.items():
-            # Convert to tensor if it's a scalar, then check for NaN
-            if isinstance(loss_value, (int, float)):
-                if not math.isnan(loss_value):
-                    epoch_aux_losses[loss_name] += loss_value
-            else:  # It's a tensor
-                if not torch.isnan(loss_value):
-                    epoch_aux_losses[loss_name] += loss_value.item()
+            loss_val = loss_value.item() if torch.is_tensor(loss_value) else loss_value
+            if not math.isnan(loss_val) and math.isfinite(loss_val):
+                epoch_aux_losses[loss_name] += loss_val
         
-        # Print loss every 25 batches for monitoring (more frequent for testing)
+        # Print loss every 25 batches
         if batch_idx % 25 == 0:
-            print(f"Batch {batch_idx}, Main Loss: {main_loss.item():.4f}, Total Loss: {total_loss.item():.4f}, Tau: {current_tau:.3f}")
-            # Safe printing of auxiliary losses
+            print(f"Batch {batch_idx}, Main Loss: {main_loss.item():.4f}, Total Loss: {total_loss.item()*GRAD_ACCUM_STEPS:.4f}, Tau: {current_tau:.3f}")
             aux_str = []
             for loss_name, loss_value in aux_losses.items():
                 val = loss_value.item() if torch.is_tensor(loss_value) else loss_value
@@ -519,7 +642,8 @@ print("End-to-end model trained and saved successfully!")
 # --- Simple Text Generation Test ---
 print("\n## Testing Text Generation ##")
 
-def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0):
+def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0, top_k=40, top_p=0.92):
+    """Improved text generation with top-k and nucleus sampling"""
     model.eval()
     
     # Tokenize the prompt
@@ -550,23 +674,36 @@ def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0):
             
             # Get the last token's logits
             last_token_logits = output[0, len(input_tokens)-1, :] / max(temperature, 1e-3)
+            
             # Clamp logits to avoid numerical issues
             last_token_logits = torch.clamp(last_token_logits, -20.0, 20.0)
             
-            # Sample from the distribution with safety checks
-            probs = torch.softmax(last_token_logits, dim=-1)
-            if not torch.isfinite(probs).all():
-                # Fallback to uniform over top-k or argmax
-                top_idx = torch.argmax(last_token_logits).item()
-                next_token = top_idx
+            # Apply top-k filtering
+            if top_k > 0:
+                indices_to_remove = last_token_logits < torch.topk(last_token_logits, top_k)[0][-1]
+                last_token_logits[indices_to_remove] = float('-inf')
+                
+            # Apply nucleus (top-p) filtering
+            if top_p > 0.0:
+                sorted_logits, sorted_indices = torch.sort(last_token_logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                
+                # Remove tokens with cumulative probability above the threshold
+                sorted_indices_to_remove = cumulative_probs > top_p
+                # Shift the indices to the right to keep also the first token above the threshold
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                
+                indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                last_token_logits[indices_to_remove] = float('-inf')
+            
+            # Sample from the distribution
+            probs = F.softmax(last_token_logits, dim=-1)
+            if not torch.isfinite(probs).all() or probs.sum() <= 0:
+                # Fallback to argmax
+                next_token = torch.argmax(last_token_logits).item()
             else:
-                probs = torch.clamp(probs, min=0.0)
-                s = probs.sum()
-                if s <= 0 or not torch.isfinite(s):
-                    next_token = torch.argmax(last_token_logits).item()
-                else:
-                    probs = probs / s
-                    next_token = torch.multinomial(probs, num_samples=1).item()
+                next_token = torch.multinomial(probs, num_samples=1).item()
             
             # Stop if we hit padding token
             if next_token == pad_token_id:
