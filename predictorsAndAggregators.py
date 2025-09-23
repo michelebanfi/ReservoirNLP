@@ -139,6 +139,7 @@ class PredictorAggregatorLM(nn.Module):
         Improved auxiliary losses with better numerical stability
         """
         aux_losses = {}
+        device = predictor_outputs[0].device if predictor_outputs else targets.device
         
         # 1. ENHANCED DIVERSITY LOSS: Multiple measures of diversity
         if len(predictor_outputs) > 1:
@@ -160,7 +161,9 @@ class PredictorAggregatorLM(nn.Module):
                     diversity_loss += -js_div
                     total_pairs += 1
             
-            aux_losses['diversity'] = diversity_loss / total_pairs if total_pairs > 0 else torch.tensor(0.0)
+            aux_losses['diversity'] = diversity_loss / total_pairs if total_pairs > 0 else torch.tensor(0.0, device=device)
+        else:
+            aux_losses['diversity'] = torch.tensor(0.0, device=device)
         
         # 2. IMPROVED SMOOTHNESS LOSS: Temporal consistency
         smoothness_loss = 0
@@ -174,7 +177,7 @@ class PredictorAggregatorLM(nn.Module):
                 # Penalize low similarity (we want smooth transitions)
                 smoothness_loss += (1 - cos_sim).mean()
         
-        aux_losses['smoothness'] = smoothness_loss / len(monologue_embeddings) if len(monologue_embeddings) > 0 else torch.tensor(0.0)
+        aux_losses['smoothness'] = smoothness_loss / len(monologue_embeddings) if len(monologue_embeddings) > 0 else torch.tensor(0.0, device=device)
         
         # 3. CONSISTENCY LOSS: Predictors should agree on confident predictions
         if len(raw_predictor_outputs) > 1:
@@ -198,7 +201,7 @@ class PredictorAggregatorLM(nn.Module):
             
             aux_losses['consistency'] = consistency_loss / (len(raw_predictor_outputs) * (len(raw_predictor_outputs) - 1) / 2)
         else:
-            aux_losses['consistency'] = torch.tensor(0.0)
+            aux_losses['consistency'] = torch.tensor(0.0, device=device)
         
         # 4. INFORMATION PRESERVATION (improved)
         info_loss = 0
@@ -215,7 +218,7 @@ class PredictorAggregatorLM(nn.Module):
             entropy_loss = F.mse_loss(entropy.mean(0), target_entropy)
             info_loss += entropy_loss
         
-        aux_losses['information'] = info_loss / len(raw_predictor_outputs)
+        aux_losses['information'] = info_loss / len(raw_predictor_outputs) if len(raw_predictor_outputs) > 0 else torch.tensor(0.0, device=device)
         
         return aux_losses
 
@@ -328,9 +331,9 @@ for epoch in range(EPOCHS):
         epoch_loss += main_loss.item()
         num_batches += 1
         
-        # Track auxiliary losses
+        # Track auxiliary losses (fix type error)
         for loss_name, loss_value in aux_losses.items():
-            if not torch.isnan(loss_value):
+            if not torch.isnan(loss_value):  # Check tensor before converting to float
                 epoch_aux_losses[loss_name] += loss_value.item()
         
         # Print loss every 50 batches for monitoring
