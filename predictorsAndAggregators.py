@@ -12,13 +12,13 @@ from tokenizers.pre_tokenizers import Whitespace
 from tqdm import tqdm
 
 # --- Configuration ---
-VOCAB_SIZE = 4000  # Reduced from 4000
+VOCAB_SIZE = 5000  # Reduced from 4000
 MAX_SEQ_LEN = 128   # Reduced from 32
-D_MODEL = 128       # Reduced from 64
-NUM_LAYERS = 2     # Reduced from 2
-NUM_HEADS = 4
+D_MODEL = 1024      # Reduced from 64
+NUM_LAYERS = 4     # Reduced from 2
+NUM_HEADS = 8
 BATCH_SIZE = 32   # Reduced from 32
-EPOCHS = 5
+EPOCHS = 10
 LR = 0.001         # Slightly increased for faster convergence
 NUM_PREDICTORS = 2
 GUMBEL_TAU = 1.0 # Temperature for Gumbel-Softmax
@@ -88,7 +88,7 @@ class PredictorAggregatorLM(nn.Module):
 # --- Data Preparation (Same as before) ---
 print("## Step 0: Preparing Dataset and Tokenizer ##")
 # Using a much smaller portion for testing (first 1000 samples)
-full_dataset = load_dataset("roneneldan/TinyStories", split="train[:5000]")
+full_dataset = load_dataset("roneneldan/TinyStories", split="train[:20000]")
 tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
 tokenizer.pre_tokenizer = Whitespace()
 trainer = BpeTrainer(vocab_size=VOCAB_SIZE, special_tokens=["[UNK]", "[PAD]"])
