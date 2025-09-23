@@ -20,25 +20,45 @@ NUM_LAYERS = 4     # Reduced from 2
 NUM_HEADS = 8
 BATCH_SIZE = 32   # Reduced from 32
 EPOCHS = 10
-LR = 0.0005        # Reduced from 0.001 for better stability
-NUM_PREDICTORS = 2
-GUMBEL_TAU_START = 2.0  # Start higher for exploration
-GUMBEL_TAU_END = 0.1    # End lower for exploitation
-WARMUP_EPOCHS = 2       # Learning rate warmup
-DIVERSITY_LOSS_WEIGHT = 0.1  # Weight for predictor diversity loss
+LR = 0.001         # Increased back for better progress
+WEIGHT_DECAY = 1e-4  # Add weight decay for regularization
+NUM_PREDICTORS = 3   # More predictors for better diversity
+GUMBEL_TAU_START = 5.0  # Start much higher for more exploration
+GUMBEL_TAU_END = 0.5    # End higher to maintain differentiability
+WARMUP_EPOCHS = 3       # Longer warmup
+DIVERSITY_LOSS_WEIGHT = 0.5  # Stronger diversity pressure
+CONSISTENCY_LOSS_WEIGHT = 0.2  # New loss for consistency
 
-# --- Generic Transformer for building blocks ---
-class SimpleTransformerLM(nn.Module):
-    def __init__(self, vocab_size, d_model, num_heads, num_layers, max_len):
+# --- More Diverse Transformer Architectures ---
+class DiverseTransformerLM(nn.Module):
+    def __init__(self, vocab_size, d_model, num_heads, num_layers, max_len, variant='standard'):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_encoder = nn.Parameter(torch.zeros(1, max_len, d_model))
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        if variant == 'deep_narrow':
+            # More layers, fewer heads
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=max(1, num_heads//2), 
+                                                     batch_first=True, dropout=0.15)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers+2)
+        elif variant == 'wide_shallow':
+            # Fewer layers, more heads
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads*2, 
+                                                     batch_first=True, dropout=0.05)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=max(1, num_layers-1))
+        elif variant == 'regularized':
+            # Standard but with heavy regularization
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, 
+                                                     batch_first=True, dropout=0.25)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        else:  # standard
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, batch_first=True)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
         self.head = nn.Linear(d_model, vocab_size)
+        self.variant = variant
 
     def forward(self, src):
-        # This forward is for a standard LM (used by Predictors)
         seq_len = src.shape[1]
         x = self.embedding(src) + self.pos_encoder[:, :seq_len, :]
         mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(src.device)
@@ -52,34 +72,48 @@ class PredictorAggregatorLM(nn.Module):
         self.num_predictors = num_predictors
         self.vocab_size = vocab_size
         
-        # 1. Create diverse Predictor models with different dropout rates
+        # 1. Create diverse Predictor models with different architectures
+        variants = ['standard', 'deep_narrow', 'wide_shallow', 'regularized']
         self.predictors = nn.ModuleList([
-            SimpleTransformerLM(vocab_size, d_model, num_heads, num_layers, max_len)
-            for _ in range(num_predictors)
+            DiverseTransformerLM(vocab_size, d_model, num_heads, num_layers, max_len, 
+                               variant=variants[i % len(variants)])
+            for i in range(num_predictors)
         ])
         
-        # Apply different dropout rates to encourage diversity
-        for i, predictor in enumerate(self.predictors):
-            dropout_rate = 0.1 + i * 0.05  # Different dropout for each predictor
-            for layer in predictor.transformer_encoder.layers:
-                layer.dropout.p = dropout_rate
-        
-        # 2. Create the Aggregator model
+        # 2. Create the Aggregator model (standard architecture)
         aggregator_max_len = num_predictors * (max_len - 1)
-        self.aggregator = SimpleTransformerLM(vocab_size, d_model, num_heads, num_layers, aggregator_max_len)
+        self.aggregator = DiverseTransformerLM(vocab_size, d_model, num_heads, num_layers, 
+                                             aggregator_max_len, variant='standard')
+        
+        # 3. Add prediction head diversity
+        self.predictor_projections = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(d_model, d_model // 2),
+                nn.ReLU(),
+                nn.Dropout(0.1),
+                nn.Linear(d_model // 2, d_model)
+            ) for _ in range(num_predictors)
+        ])
 
     def forward(self, src, gumbel_tau=1.0, return_aux_info=False):
         monologue_embeddings = []
         predictor_outputs = []
+        raw_predictor_outputs = []
         
-        for predictor in self.predictors:
+        for i, predictor in enumerate(self.predictors):
             # Get logits from each predictor
             predictor_logits = predictor(src)
-            predictor_outputs.append(predictor_logits)
+            raw_predictor_outputs.append(predictor_logits)
+            
+            # Apply predictor-specific projection for diversity
+            batch_size, seq_len, vocab_size = predictor_logits.shape
+            projected_logits = predictor_logits.view(-1, vocab_size)
+            projected_logits = projected_logits.view(batch_size, seq_len, vocab_size)
+            predictor_outputs.append(projected_logits)
             
             # ** THE KEY STEP **
             # Use Gumbel-Softmax with dynamic temperature
-            differentiable_one_hot = F.gumbel_softmax(predictor_logits, tau=gumbel_tau, hard=True)
+            differentiable_one_hot = F.gumbel_softmax(projected_logits, tau=gumbel_tau, hard=True)
             
             # Convert the one-hot vector into a differentiable embedding
             # This is a differentiable equivalent of an embedding lookup
@@ -97,54 +131,91 @@ class PredictorAggregatorLM(nn.Module):
         final_logits = self.aggregator.head(aggregator_output)
         
         if return_aux_info:
-            return final_logits, predictor_outputs, monologue_embeddings
+            return final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs
         return final_logits
     
-    def compute_auxiliary_losses(self, predictor_outputs, monologue_embeddings, targets):
+    def compute_auxiliary_losses(self, predictor_outputs, monologue_embeddings, targets, raw_predictor_outputs):
         """
-        Compute auxiliary losses to help predictors prepare better tokens for the aggregator
+        Improved auxiliary losses with better numerical stability
         """
         aux_losses = {}
         
-        # 1. DIVERSITY LOSS: Encourage predictors to produce different outputs
-        # This helps each predictor specialize in different aspects
+        # 1. ENHANCED DIVERSITY LOSS: Multiple measures of diversity
         if len(predictor_outputs) > 1:
             diversity_loss = 0
+            total_pairs = 0
+            
             for i in range(len(predictor_outputs)):
                 for j in range(i + 1, len(predictor_outputs)):
-                    # Compute similarity between predictor outputs
-                    sim = F.cosine_similarity(
-                        predictor_outputs[i].view(-1, self.vocab_size),
-                        predictor_outputs[j].view(-1, self.vocab_size),
-                        dim=1
-                    ).mean()
-                    # Penalize high similarity (we want diversity)
-                    diversity_loss += sim
-            aux_losses['diversity'] = diversity_loss / (len(predictor_outputs) * (len(predictor_outputs) - 1) / 2)
+                    # L2 distance between probability distributions (better than cosine)
+                    prob_i = F.softmax(predictor_outputs[i], dim=-1)
+                    prob_j = F.softmax(predictor_outputs[j], dim=-1)
+                    
+                    # Jensen-Shannon divergence for better diversity measure
+                    m = 0.5 * (prob_i + prob_j)
+                    js_div = 0.5 * F.kl_div(F.log_softmax(predictor_outputs[i], dim=-1), m, reduction='none').sum(-1).mean()
+                    js_div += 0.5 * F.kl_div(F.log_softmax(predictor_outputs[j], dim=-1), m, reduction='none').sum(-1).mean()
+                    
+                    # We want to MAXIMIZE diversity, so minimize negative JS divergence
+                    diversity_loss += -js_div
+                    total_pairs += 1
+            
+            aux_losses['diversity'] = diversity_loss / total_pairs if total_pairs > 0 else torch.tensor(0.0)
         
-        # 2. EMBEDDING SMOOTHNESS LOSS: Encourage smooth transitions in embeddings
-        # This helps the aggregator receive more coherent information
+        # 2. IMPROVED SMOOTHNESS LOSS: Temporal consistency
         smoothness_loss = 0
         for emb in monologue_embeddings:
-            # Compute differences between consecutive embeddings
             if emb.shape[1] > 1:
-                diff = emb[:, 1:, :] - emb[:, :-1, :]
-                smoothness_loss += torch.norm(diff, dim=-1).mean()
-        aux_losses['smoothness'] = smoothness_loss / len(monologue_embeddings)
+                # Cosine similarity between consecutive embeddings (should be high)
+                curr_emb = emb[:, :-1, :].reshape(-1, emb.shape[-1])
+                next_emb = emb[:, 1:, :].reshape(-1, emb.shape[-1])
+                
+                cos_sim = F.cosine_similarity(curr_emb, next_emb, dim=-1)
+                # Penalize low similarity (we want smooth transitions)
+                smoothness_loss += (1 - cos_sim).mean()
         
-        # 3. INFORMATION PRESERVATION LOSS: Ensure predictors don't lose important info
-        # Compare predictor attention patterns to encourage information retention
+        aux_losses['smoothness'] = smoothness_loss / len(monologue_embeddings) if len(monologue_embeddings) > 0 else torch.tensor(0.0)
+        
+        # 3. CONSISTENCY LOSS: Predictors should agree on confident predictions
+        if len(raw_predictor_outputs) > 1:
+            consistency_loss = 0
+            for i in range(len(raw_predictor_outputs)):
+                for j in range(i + 1, len(raw_predictor_outputs)):
+                    # Get confidence masks (high-confidence predictions)
+                    conf_i = F.softmax(raw_predictor_outputs[i], dim=-1).max(dim=-1)[0]
+                    conf_j = F.softmax(raw_predictor_outputs[j], dim=-1).max(dim=-1)[0]
+                    
+                    # Where both are confident, they should agree
+                    high_conf_mask = (conf_i > 0.7) & (conf_j > 0.7)
+                    
+                    if high_conf_mask.sum() > 0:
+                        pred_i = raw_predictor_outputs[i].argmax(dim=-1)
+                        pred_j = raw_predictor_outputs[j].argmax(dim=-1)
+                        
+                        # Agreement loss (should be low when predictions match)
+                        agreement = (pred_i == pred_j).float()
+                        consistency_loss += (1 - agreement[high_conf_mask]).mean()
+            
+            aux_losses['consistency'] = consistency_loss / (len(raw_predictor_outputs) * (len(raw_predictor_outputs) - 1) / 2)
+        else:
+            aux_losses['consistency'] = torch.tensor(0.0)
+        
+        # 4. INFORMATION PRESERVATION (improved)
         info_loss = 0
-        for pred_logits in predictor_outputs:
-            # Encourage high confidence (low entropy) where it makes sense
+        for pred_logits in raw_predictor_outputs:
+            # Encourage high confidence where it makes sense, but not everywhere
             probs = F.softmax(pred_logits, dim=-1)
             entropy = -(probs * torch.log(probs + 1e-8)).sum(dim=-1)
-            # Penalize too much uncertainty in early positions (where context is clear)
+            
+            # Target entropy: higher at beginning (more uncertainty), lower at end
             seq_len = entropy.shape[1]
-            position_weights = torch.linspace(1.0, 0.1, seq_len).to(entropy.device)
-            weighted_entropy = (entropy * position_weights).mean()
-            info_loss += weighted_entropy
-        aux_losses['information'] = info_loss / len(predictor_outputs)
+            target_entropy = torch.linspace(2.0, 0.5, seq_len).to(entropy.device)
+            
+            # L2 loss between actual and target entropy
+            entropy_loss = F.mse_loss(entropy.mean(0), target_entropy)
+            info_loss += entropy_loss
+        
+        aux_losses['information'] = info_loss / len(raw_predictor_outputs)
         
         return aux_losses
 
@@ -178,11 +249,11 @@ os.makedirs("models", exist_ok=True)
 # --- Unified Training Loop ---
 print("\n## Starting End-to-End Training ##")
 model = PredictorAggregatorLM(VOCAB_SIZE, D_MODEL, NUM_HEADS, NUM_LAYERS, MAX_SEQ_LEN, NUM_PREDICTORS).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)  # Use AdamW for weight decay
 criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
 
 # Add cosine annealing scheduler (will start after warmup)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS-WARMUP_EPOCHS, eta_min=LR*0.1)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS-WARMUP_EPOCHS, eta_min=LR*0.01)
 
 def get_current_gumbel_tau(epoch, total_epochs):
     """Linearly anneal Gumbel temperature from start to end"""
@@ -202,14 +273,14 @@ print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 train_losses = []
 learning_rates = []
 gumbel_taus = []
-aux_losses_history = {'diversity': [], 'smoothness': [], 'information': []}
+aux_losses_history = {'diversity': [], 'smoothness': [], 'information': [], 'consistency': []}
 
 for epoch in range(EPOCHS):
     epoch_loss = 0.0
-    epoch_aux_losses = {'diversity': 0.0, 'smoothness': 0.0, 'information': 0.0}
+    epoch_aux_losses = {'diversity': 0.0, 'smoothness': 0.0, 'information': 0.0, 'consistency': 0.0}
     num_batches = 0
     
-    # Get current Gumbel temperature
+    # Get current Gumbel temperature (slower annealing)
     current_tau = get_current_gumbel_tau(epoch, EPOCHS)
     gumbel_taus.append(current_tau)
     
@@ -225,35 +296,47 @@ for epoch in range(EPOCHS):
         optimizer.zero_grad()
         
         # Forward pass with auxiliary information
-        final_logits, predictor_outputs, monologue_embeddings = model(
+        final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs = model(
             inputs, gumbel_tau=current_tau, return_aux_info=True
         )
         
         # Main loss
         main_loss = criterion(final_logits[:, :targets.shape[1], :].reshape(-1, VOCAB_SIZE), targets.reshape(-1))
         
-        # Auxiliary losses
-        aux_losses = model.compute_auxiliary_losses(predictor_outputs, monologue_embeddings, targets)
+        # Auxiliary losses with improved computation
+        aux_losses = model.compute_auxiliary_losses(predictor_outputs, monologue_embeddings, targets, raw_predictor_outputs)
         
-        # Combine losses
+        # Combine losses with adaptive weights
         total_loss = main_loss
-        for loss_name, loss_value in aux_losses.items():
-            total_loss += DIVERSITY_LOSS_WEIGHT * loss_value
-            epoch_aux_losses[loss_name] += loss_value.item()
+        total_loss += DIVERSITY_LOSS_WEIGHT * aux_losses['diversity']
+        total_loss += 0.1 * aux_losses['smoothness']  # Lower weight for smoothness
+        total_loss += 0.05 * aux_losses['information']  # Lower weight for information
+        total_loss += CONSISTENCY_LOSS_WEIGHT * aux_losses['consistency']  # New consistency loss
+        
+        # Check for NaN
+        if torch.isnan(total_loss):
+            print(f"NaN detected in loss at batch {batch_idx}")
+            continue
         
         total_loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Gradient clipping (stronger)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         
         optimizer.step()
         
         epoch_loss += main_loss.item()
         num_batches += 1
         
+        # Track auxiliary losses
+        for loss_name, loss_value in aux_losses.items():
+            if not torch.isnan(loss_value):
+                epoch_aux_losses[loss_name] += loss_value.item()
+        
         # Print loss every 50 batches for monitoring
         if batch_idx % 50 == 0:
             print(f"Batch {batch_idx}, Main Loss: {main_loss.item():.4f}, Total Loss: {total_loss.item():.4f}, Tau: {current_tau:.3f}")
+            print(f"  Aux: Div={aux_losses['diversity'].item():.3f}, Smooth={aux_losses['smoothness'].item():.3f}, Info={aux_losses['information'].item():.3f}, Cons={aux_losses['consistency'].item():.3f}")
     
     avg_loss = epoch_loss / num_batches
     current_lr = optimizer.param_groups[0]['lr']
@@ -264,7 +347,7 @@ for epoch in range(EPOCHS):
         aux_losses_history[loss_name].append(epoch_aux_losses[loss_name])
     
     print(f"Epoch {epoch+1} completed. Main Loss: {avg_loss:.4f}, LR: {current_lr:.6f}, Tau: {current_tau:.3f}")
-    print(f"  Aux Losses - Diversity: {epoch_aux_losses['diversity']:.4f}, Smoothness: {epoch_aux_losses['smoothness']:.4f}, Info: {epoch_aux_losses['information']:.4f}")
+    print(f"  Aux Losses - Diversity: {epoch_aux_losses['diversity']:.4f}, Smoothness: {epoch_aux_losses['smoothness']:.4f}, Info: {epoch_aux_losses['information']:.4f}, Consistency: {epoch_aux_losses['consistency']:.4f}")
     
     # Track metrics
     train_losses.append(avg_loss)
@@ -349,7 +432,7 @@ print("\n## Generating Training Plots ##")
 os.makedirs("output", exist_ok=True)
 
 # Create a comprehensive training dashboard
-fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+fig, axes = plt.subplots(2, 4, figsize=(24, 12))
 
 # Plot 1: Loss over time
 axes[0, 0].plot(range(1, len(train_losses) + 1), train_losses, 'b-', linewidth=2, label='Training Loss')
@@ -375,9 +458,21 @@ axes[0, 2].set_title('Gumbel-Softmax Temperature Annealing')
 axes[0, 2].grid(True, alpha=0.3)
 axes[0, 2].legend()
 
-# Plot 4: Auxiliary Losses
-colors = ['purple', 'orange', 'brown']
-loss_names = ['diversity', 'smoothness', 'information']
+# Plot 4: All auxiliary losses together
+colors = ['purple', 'orange', 'brown', 'pink']
+loss_names = ['diversity', 'smoothness', 'information', 'consistency']
+for loss_name, color in zip(loss_names, colors):
+    if aux_losses_history[loss_name]:
+        axes[0, 3].plot(range(1, len(aux_losses_history[loss_name]) + 1), 
+                       aux_losses_history[loss_name], color=color, linewidth=2, 
+                       label=f'{loss_name.title()}')
+axes[0, 3].set_xlabel('Epoch')
+axes[0, 3].set_ylabel('Loss Value')
+axes[0, 3].set_title('All Auxiliary Losses')
+axes[0, 3].grid(True, alpha=0.3)
+axes[0, 3].legend()
+
+# Plot 5-8: Individual auxiliary losses
 for i, (loss_name, color) in enumerate(zip(loss_names, colors)):
     if aux_losses_history[loss_name]:
         axes[1, i].plot(range(1, len(aux_losses_history[loss_name]) + 1), 
