@@ -639,11 +639,11 @@ for epoch in range(EPOCHS):
 torch.save(model.state_dict(), "models/end_to_end_model.pt")
 print("End-to-end model trained and saved successfully!")
 
-# --- Simple Text Generation Test ---
-print("\n## Testing Text Generation ##")
+# --- Enhanced Text Generation with Predictor Outputs ---
+print("\n## Testing Enhanced Text Generation with Predictor Outputs ##")
 
-def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0, top_k=40, top_p=0.92):
-    """Improved text generation with top-k and nucleus sampling"""
+def generate_text_with_predictor_outputs(model, tokenizer, prompt, max_length=20, temperature=1.0, top_k=40, top_p=0.92):
+    """Text generation with visibility into each predictor's outputs"""
     model.eval()
     
     # Tokenize the prompt
@@ -657,6 +657,7 @@ def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0, top_
         tokens = tokens[:MAX_SEQ_LEN - 1]
     
     generated_tokens = tokens.copy()
+    predictor_token_history = [[] for _ in range(len(model.predictors))]
     
     with torch.no_grad():
         for _ in range(max_length):
@@ -669,8 +670,16 @@ def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0, top_
                 padding = torch.full((1, MAX_SEQ_LEN - 1 - input_tensor.shape[1]), pad_token_id, dtype=torch.long).to(device)
                 input_tensor = torch.cat([input_tensor, padding], dim=1)
             
-            # Generate prediction
-            output = model(input_tensor)
+            # NEW: Get each predictor's output and the final output
+            predictor_outputs = []
+            for i, predictor in enumerate(model.predictors):
+                pred_logits = predictor(input_tensor)
+                pred_token = torch.argmax(pred_logits[0, len(input_tokens)-1, :]).item()
+                predictor_outputs.append(pred_token)
+                predictor_token_history[i].append(pred_token)
+            
+            # Generate aggregated prediction
+            output, _, _, _, gate_weights = model(input_tensor, return_aux_info=True)
             
             # Get the last token's logits
             last_token_logits = output[0, len(input_tokens)-1, :] / max(temperature, 1e-3)
@@ -714,9 +723,18 @@ def generate_text(model, tokenizer, prompt, max_length=20, temperature=1.0, top_
     # Decode the generated tokens
     try:
         generated_text = tokenizer.decode(generated_tokens)
-        return generated_text
-    except:
-        return f"Generated tokens: {generated_tokens}"
+        
+        # NEW: Decode predictor outputs
+        predictor_texts = []
+        for i, pred_tokens in enumerate(predictor_token_history):
+            # Combine original prompt tokens with predictor's generated tokens
+            full_pred_sequence = tokens + pred_tokens
+            pred_text = tokenizer.decode(full_pred_sequence)
+            predictor_texts.append(pred_text)
+        
+        return generated_text, predictor_texts
+    except Exception as e:
+        return f"Generated tokens: {generated_tokens}", [f"Error decoding predictor {i}" for i in range(len(model.predictors))]
 
 # Test with a few different prompts
 test_prompts = [
@@ -728,14 +746,58 @@ test_prompts = [
 
 for i, prompt in enumerate(test_prompts):
     print(f"\nTest {i+1}: Prompt: '{prompt}'")
-    generated = generate_text(model, tokenizer, prompt, max_length=15, temperature=0.8)
-    print(f"Generated: {generated}")
+    generated_text, predictor_texts = generate_text_with_predictor_outputs(model, tokenizer, prompt, max_length=15, temperature=0.8)
+    print(f"Final Aggregated Output: {generated_text}")
+    
+    print("Individual Predictor Outputs:")
+    for j, pred_text in enumerate(predictor_texts):
+        print(f"  Predictor {j+1}: {pred_text}")
+    
+    for p_idx, (p_text, p_conf) in enumerate(result['predictor_outputs']):
+        variant = ['standard', 'deep_narrow', 'wide_shallow', 'regularized'][p_idx % 4]
+        print(f"  Predictor {p_idx+1} ({variant}), Confidence: {p_conf:.3f}")
+        print(f"    {p_text}")
+    
+    print("\nAggregator Weights by Position:")
+    for pos, weights in enumerate(result['gate_weights']):
+        formatted_weights = [f"{w:.3f}" for w in weights]
+        print(f"  Pos {pos+1}: {formatted_weights}")
+    
+    print(f"{'='*50}")
 
-print("\nText generation test completed!")
+print("\nEnhanced text generation test completed!")
+
+# --- Visualize Predictor Contributions ---
+print("\n## Creating Predictor Contribution Visualizations ##")
+os.makedirs("output", exist_ok=True)
+
+# Create visualizations for the last generated text
+prompt_idx = len(test_prompts) - 1
+vis_prompt = test_prompts[prompt_idx] if test_prompts[prompt_idx] else "[empty prompt]"
+result = generate_text_with_predictors(model, tokenizer, test_prompts[prompt_idx], max_length=30, temperature=0.8)
+
+# Plot gate weights over generation steps
+plt.figure(figsize=(12, 6))
+weights_array = np.array(result['gate_weights'])
+steps = range(weights_array.shape[0])
+for p_idx in range(weights_array.shape[1]):
+    variant = ['standard', 'deep_narrow', 'wide_shallow', 'regularized'][p_idx % 4]
+    plt.plot(steps, weights_array[:, p_idx], 
+             label=f"Predictor {p_idx+1} ({variant})", 
+             marker='o', linewidth=2)
+
+plt.title(f"Predictor Contributions During Generation\nPrompt: '{vis_prompt}'")
+plt.xlabel("Generation Step")
+plt.ylabel("Gate Weight")
+plt.ylim(0, 1.0)
+plt.grid(True, alpha=0.3)
+plt.legend(loc='best')
+plt.savefig('output/predictor_contributions.png', dpi=300, bbox_inches='tight')
+
+print("Predictor contribution visualization saved to output/predictor_contributions.png")
 
 # --- Plotting Training Metrics ---
 print("\n## Generating Training Plots ##")
-os.makedirs("output", exist_ok=True)
 
 # Create a comprehensive training dashboard
 fig, axes = plt.subplots(2, 4, figsize=(24, 12))
@@ -819,3 +881,8 @@ if len(train_losses) >= 3:
         print("   - Temperature annealing for Gumbel-Softmax")
 
 plt.close('all')  # Clean up matplotlib
+
+print("\n## Enhanced Generation Demo Complete ##")
+print(f"- Visualized contributions from {model.num_predictors} different predictors")
+print("- Individual predictor outputs now shown during text generation")
+print("- Gate weight visualization shows which predictor influences each token")
