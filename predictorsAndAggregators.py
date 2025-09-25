@@ -11,6 +11,7 @@ from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import numpy as np
 from dataclasses import dataclass
 
 # --- Configuration ---
@@ -232,164 +233,99 @@ class PredictorAggregatorLM(nn.Module):
         if return_aux_info:
             return final_logits, predictor_outputs, monologue_embeddings, raw_predictor_outputs, gate_weights
         return final_logits
-    
+
     def compute_auxiliary_losses(self, predictor_outputs, monologue_embeddings, targets, raw_predictor_outputs, gate_weights=None):
         """
-        Completely rewritten auxiliary losses for better training signal
+        Stable, non-negative auxiliary losses to guide training:
+        - diversity: average pairwise cosine similarity between predictor embeddings (>=0)
+        - smoothness: temporal smoothness of embeddings (>=0)
+        - consistency: disagreement rate among confident predictors (in [0,1])
+        - information: match position-wise entropy schedule (>=0)
+        - gate_diversity: encourage diverse gate usage (in [0,1])
         """
         aux_losses = {}
         device = predictor_outputs[0].device if predictor_outputs else targets.device
         eps = 1e-8
-        
-        # 1. IMPROVED DIVERSITY LOSS: Encourage diversity among predictors
-        if len(predictor_outputs) > 1:
-            diversity_loss = 0.0
-            valid_pairs = 0
-            
-            for i in range(len(predictor_outputs)):
-                for j in range(i + 1, len(predictor_outputs)):
-                    # Get probability distributions
-                    probs_i = F.softmax(predictor_outputs[i].detach(), dim=-1)
-                    probs_j = F.softmax(predictor_outputs[j], dim=-1)
-                    
-                    # KL divergence (asymmetric) from j to i
-                    # We want j to be different from i (i is detached as reference)
-                    log_probs_j = torch.log(torch.clamp(probs_j, min=eps))
-                    kl_div = F.kl_div(log_probs_j, probs_i, reduction='none', log_target=False)
-                    
-                    # Focus diversity on tokens where the target isn't padding
-                    non_pad_mask = (targets != pad_token_id).unsqueeze(-1).float()
-                    masked_kl = (kl_div * non_pad_mask).sum(-1).mean()
-                    
-                    # We want to MINIMIZE negative KL (MAXIMIZE KL)
-                    # Smaller negative value = larger positive KL = more diversity
-                    diversity_loss -= masked_kl
-                    valid_pairs += 1
-            
-            if valid_pairs > 0:
-                # Normalize and scale
-                diversity_loss = diversity_loss / valid_pairs
-                # Add regularization to prevent extreme values
-                aux_losses['diversity'] = torch.tanh(diversity_loss) * 2.0
+
+        # 1) Diversity loss (non-negative): minimize average pairwise cosine similarity
+        if len(monologue_embeddings) > 1:
+            mean_embs = []
+            for emb in monologue_embeddings:  # each: [B, S, D]
+                if emb is None:
+                    continue
+                m = emb.mean(dim=(0, 1), keepdim=False)  # [D]
+                m = F.normalize(m, dim=-1)
+                mean_embs.append(m)
+            if len(mean_embs) > 1:
+                sims = []
+                for i in range(len(mean_embs)):
+                    for j in range(i + 1, len(mean_embs)):
+                        sim = torch.sum(mean_embs[i] * mean_embs[j])  # cosine because normalized
+                        sims.append((sim + 1.0) * 0.5)  # map to [0,1]
+                aux_losses['diversity'] = torch.stack(sims).mean() if sims else torch.tensor(0.0, device=device)
             else:
                 aux_losses['diversity'] = torch.tensor(0.0, device=device)
         else:
             aux_losses['diversity'] = torch.tensor(0.0, device=device)
-        
-        # 2. FIXED SMOOTHNESS LOSS: Temporal consistency in predictions
-        smoothness_loss = 0.0
-        valid_sequences = 0
-        
+
+        # 2) Smoothness loss
+        smooth_vals = []
         for emb in monologue_embeddings:
-            if emb.shape[1] > 1:
-                # Get embeddings for consecutive positions
-                curr_emb = emb[:, :-1, :]
-                next_emb = emb[:, 1:, :]
-                
-                # Normalize embeddings for stable cosine similarity
-                curr_norm = F.normalize(curr_emb, p=2, dim=-1)
-                next_norm = F.normalize(next_emb, p=2, dim=-1)
-                
-                # Calculate cosine similarity (should be high for smoothness)
-                cos_sim = (curr_norm * next_norm).sum(dim=-1)
-                
-                # Create mask for non-padding tokens
-                seq_mask = (targets != pad_token_id)[:, :-1] & (targets != pad_token_id)[:, 1:]
-                
-                # Apply mask and calculate loss
-                if seq_mask.sum() > 0:
-                    # We want high similarity (close to 1), so penalize 1-similarity
-                    masked_sim = cos_sim[seq_mask]
-                    smoothness_loss += (1.0 - masked_sim).mean()
-                    valid_sequences += 1
-        
-        if valid_sequences > 0:
-            aux_losses['smoothness'] = smoothness_loss / valid_sequences
-        else:
-            aux_losses['smoothness'] = torch.tensor(0.0, device=device)
-        
-        # 3. IMPROVED CONSISTENCY LOSS: Predictors should agree on confident predictions
+            if emb is None or emb.shape[1] < 2:
+                continue
+            deltas = emb[:, 1:, :] - emb[:, :-1, :]
+            smooth_vals.append(deltas.pow(2).mean())
+        aux_losses['smoothness'] = torch.stack(smooth_vals).mean() if smooth_vals else torch.tensor(0.0, device=device)
+
+        # 3) Consistency loss
         if len(raw_predictor_outputs) > 1:
-            consistency_loss = 0.0
-            valid_comparisons = 0
-            
-            # Get predictions from each model
-            pred_indices = [logits.argmax(dim=-1) for logits in raw_predictor_outputs]
-            pred_probs = [F.softmax(logits, dim=-1) for logits in raw_predictor_outputs]
-            
-            # Get confidence scores for each prediction
-            confidences = [probs.gather(-1, indices.unsqueeze(-1)).squeeze(-1) 
-                         for probs, indices in zip(pred_probs, pred_indices)]
-            
-            # Create mask for non-padding positions
-            non_pad_mask = (targets != pad_token_id)
-            
-            # For each pair of predictors
-            for i in range(len(pred_indices)):
-                for j in range(i+1, len(pred_indices)):
-                    # Find positions where both are confident (>0.6)
-                    joint_conf_mask = (confidences[i] > 0.6) & (confidences[j] > 0.6) & non_pad_mask
-                    
-                    if joint_conf_mask.sum() > 0:
-                        # Check agreement on these positions
-                        agreement = (pred_indices[i][joint_conf_mask] == pred_indices[j][joint_conf_mask]).float()
-                        consistency_loss += (1.0 - agreement.mean())
-                        valid_comparisons += 1
-            
-            if valid_comparisons > 0:
-                aux_losses['consistency'] = consistency_loss / valid_comparisons
-            else:
-                aux_losses['consistency'] = torch.tensor(0.0, device=device)
+            top_tokens = []
+            top_probs = []
+            for logits in raw_predictor_outputs:  # [B, S, V]
+                probs = F.softmax(logits, dim=-1)
+                pvals, tidx = probs.max(dim=-1)  # [B, S]
+                top_tokens.append(tidx)
+                top_probs.append(pvals)
+            top_tokens = torch.stack(top_tokens, dim=0)  # [P, B, S]
+            top_probs = torch.stack(top_probs, dim=0)    # [P, B, S]
+            conf_mask = top_probs >= 0.6
+            P = top_tokens.shape[0]
+            pairs = []
+            for i in range(P):
+                for j in range(i + 1, P):
+                    valid = conf_mask[i] & conf_mask[j] & (targets != pad_token_id)
+                    if valid.any():
+                        agree = (top_tokens[i] == top_tokens[j]) & valid
+                        disagree_rate = 1.0 - (agree.sum().float() / (valid.sum().float() + eps))
+                        pairs.append(disagree_rate)
+            aux_losses['consistency'] = torch.stack(pairs).mean() if pairs else torch.tensor(0.0, device=device)
         else:
             aux_losses['consistency'] = torch.tensor(0.0, device=device)
-        
-        # 4. BETTER INFORMATION LOSS: Balancing entropy across sequence positions
+
+        # 4) Information loss (position-wise entropy schedule)
         info_loss = 0.0
         valid_predictors = 0
-        
         for pred_logits in raw_predictor_outputs:
-            # Calculate token distribution entropy
             probs = F.softmax(pred_logits, dim=-1)
-            entropy = -(probs * torch.log(torch.clamp(probs, min=eps))).sum(dim=-1)
-            
-            # Create position-dependent target entropy (higher at beginning, lower at end)
+            entropy = -(probs * torch.log(torch.clamp(probs, min=eps))).sum(dim=-1)  # [B, S]
             seq_len = entropy.shape[1]
-            # More nuanced entropy targets - starts high, gradually reduces
-            target_entropy = torch.linspace(2.0, 0.5, seq_len).to(entropy.device)
-            
-            # Mask for non-padding positions
+            target_entropy = torch.linspace(2.0, 0.5, seq_len, device=entropy.device)
             seq_mask = (targets != pad_token_id)
             masked_entropy = entropy * seq_mask.float()
-            
-            # Average across batch for each position
-            avg_entropy_per_pos = masked_entropy.sum(0) / (seq_mask.sum(0) + eps)
-            
-            # Compare with target entropy
+            avg_entropy_per_pos = masked_entropy.sum(0) / (seq_mask.sum(0).float() + eps)
             pos_info_loss = F.mse_loss(avg_entropy_per_pos, target_entropy)
             info_loss += pos_info_loss
             valid_predictors += 1
-        
-        if valid_predictors > 0:
-            aux_losses['information'] = info_loss / valid_predictors
-        else:
-            aux_losses['information'] = torch.tensor(0.0, device=device)
-        
-        # 5. NEW: Gate diversity loss - encourage different predictors to be selected
+        aux_losses['information'] = info_loss / valid_predictors if valid_predictors > 0 else torch.tensor(0.0, device=device)
+
+        # 5) Gate diversity
         if gate_weights is not None:
-            # Average gate weights across batch and sequence
-            avg_gate = gate_weights.mean(dim=(0,2))  # Shape: [num_predictors]
-            
-            # Compute entropy of the average gate distribution
-            # Higher entropy = more diverse usage of predictors
+            # gate_weights: [B, P, S, 1]
+            avg_gate = gate_weights.mean(dim=(0, 2, 3))  # [P]
             gate_entropy = -(avg_gate * torch.log(torch.clamp(avg_gate, min=eps))).sum()
-            
-            # Maximum possible entropy is log(num_predictors)
-            max_entropy = math.log(self.num_predictors)
-            
-            # Normalize and invert (we want to maximize entropy)
-            gate_diversity_loss = 1.0 - (gate_entropy / max_entropy)
-            aux_losses['gate_diversity'] = gate_diversity_loss
-        
+            max_entropy = math.log(float(self.num_predictors)) if self.num_predictors > 1 else 1.0
+            aux_losses['gate_diversity'] = 1.0 - (gate_entropy / (max_entropy + eps))
+
         return aux_losses
 
 # --- Data Preparation (Same as before) ---
@@ -642,6 +578,97 @@ print("End-to-end model trained and saved successfully!")
 # --- Enhanced Text Generation with Predictor Outputs ---
 print("\n## Testing Enhanced Text Generation with Predictor Outputs ##")
 
+def generate_text_with_predictors(model, tokenizer, prompt, max_length=20, temperature=1.0, top_k=40, top_p=0.92):
+    """
+    Generate text while collecting per-step gate weights and per-predictor outputs.
+    Returns a dict with:
+      - generated_text: final aggregated text
+      - predictor_outputs: list of (text, avg_confidence) for each predictor
+      - gate_weights: list[step] -> list[num_predictors] of weights
+    """
+    model.eval()
+
+    # Tokenize prompt
+    tokens = tokenizer.encode(prompt).ids if prompt and prompt.strip() else [tokenizer.token_to_id("[UNK]")]
+    if len(tokens) >= MAX_SEQ_LEN - 1:
+        tokens = tokens[:MAX_SEQ_LEN - 1]
+
+    generated_tokens = tokens.copy()
+    # For each predictor, store tokens and confidences per step
+    per_pred_tokens = [[] for _ in range(len(model.predictors))]
+    per_pred_confidences = [[] for _ in range(len(model.predictors))]
+    gate_weights_steps = []
+
+    with torch.no_grad():
+        for _ in range(max_length):
+            input_tokens = generated_tokens[-MAX_SEQ_LEN+1:] if len(generated_tokens) >= MAX_SEQ_LEN-1 else generated_tokens
+            input_tensor = torch.tensor([input_tokens], dtype=torch.long).to(device)
+            # Right pad to expected length
+            if input_tensor.shape[1] < MAX_SEQ_LEN - 1:
+                padding = torch.full((1, MAX_SEQ_LEN - 1 - input_tensor.shape[1]), pad_token_id, dtype=torch.long, device=device)
+                input_tensor = torch.cat([input_tensor, padding], dim=1)
+
+            # Collect per-predictor next-token and confidence
+            for i, predictor in enumerate(model.predictors):
+                pred_logits = predictor(input_tensor)  # [1, S, V]
+                pos = len(input_tokens) - 1
+                pred_probs = F.softmax(pred_logits[0, pos, :], dim=-1)
+                pred_conf, pred_tok = torch.max(pred_probs, dim=-1)
+                per_pred_tokens[i].append(int(pred_tok.item()))
+                per_pred_confidences[i].append(float(pred_conf.item()))
+
+            # Aggregated output and gate weights
+            output, _, _, _, gw = model(input_tensor, return_aux_info=True)
+            pos = len(input_tokens) - 1
+            # gw shape expected [B, P, S, 1]
+            if gw is not None:
+                step_weights = gw[0, :, pos, 0].detach().cpu().tolist()
+                gate_weights_steps.append(step_weights)
+
+            # Get last position logits and sample
+            last_token_logits = output[0, pos, :] / max(temperature, 1e-3)
+            last_token_logits = torch.clamp(last_token_logits, -20.0, 20.0)
+
+            if top_k and top_k > 0:
+                kth = torch.topk(last_token_logits, min(top_k, last_token_logits.size(-1)))[0][-1]
+                last_token_logits[last_token_logits < kth] = float('-inf')
+
+            if top_p and top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(last_token_logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                sorted_indices_to_remove = cumulative_probs > top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                last_token_logits[indices_to_remove] = float('-inf')
+
+            probs = F.softmax(last_token_logits, dim=-1)
+            next_token = int(torch.argmax(last_token_logits).item()) if (not torch.isfinite(probs).all() or probs.sum() <= 0) else int(torch.multinomial(probs, 1).item())
+            if next_token == pad_token_id:
+                break
+            generated_tokens.append(next_token)
+
+    # Build outputs
+    try:
+        aggregated_text = tokenizer.decode(generated_tokens)
+    except Exception:
+        aggregated_text = f"Generated tokens: {generated_tokens}"
+
+    predictor_outputs = []
+    for i in range(len(model.predictors)):
+        try:
+            pred_text = tokenizer.decode(tokens + per_pred_tokens[i])
+        except Exception:
+            pred_text = f"Tokens: {tokens + per_pred_tokens[i]}"
+        avg_conf = float(np.mean(per_pred_confidences[i])) if per_pred_confidences[i] else 0.0
+        predictor_outputs.append((pred_text, avg_conf))
+
+    return {
+        'generated_text': aggregated_text,
+        'predictor_outputs': predictor_outputs,
+        'gate_weights': gate_weights_steps,
+    }
+
 def generate_text_with_predictor_outputs(model, tokenizer, prompt, max_length=20, temperature=1.0, top_k=40, top_p=0.92):
     """Text generation with visibility into each predictor's outputs"""
     model.eval()
@@ -746,22 +773,20 @@ test_prompts = [
 
 for i, prompt in enumerate(test_prompts):
     print(f"\nTest {i+1}: Prompt: '{prompt}'")
-    generated_text, predictor_texts = generate_text_with_predictor_outputs(model, tokenizer, prompt, max_length=15, temperature=0.8)
-    print(f"Final Aggregated Output: {generated_text}")
-    
+    result = generate_text_with_predictors(model, tokenizer, prompt, max_length=15, temperature=0.8)
+    print(f"Final Aggregated Output: {result['generated_text']}")
+
     print("Individual Predictor Outputs:")
-    for j, pred_text in enumerate(predictor_texts):
-        print(f"  Predictor {j+1}: {pred_text}")
-    
     for p_idx, (p_text, p_conf) in enumerate(result['predictor_outputs']):
         variant = ['standard', 'deep_narrow', 'wide_shallow', 'regularized'][p_idx % 4]
         print(f"  Predictor {p_idx+1} ({variant}), Confidence: {p_conf:.3f}")
         print(f"    {p_text}")
-    
-    print("\nAggregator Weights by Position:")
-    for pos, weights in enumerate(result['gate_weights']):
-        formatted_weights = [f"{w:.3f}" for w in weights]
-        print(f"  Pos {pos+1}: {formatted_weights}")
+
+    if result['gate_weights']:
+        print("\nAggregator Weights by Position:")
+        for pos, weights in enumerate(result['gate_weights']):
+            formatted_weights = [f"{w:.3f}" for w in weights]
+            print(f"  Pos {pos+1}: {formatted_weights}")
     
     print(f"{'='*50}")
 
@@ -776,25 +801,27 @@ prompt_idx = len(test_prompts) - 1
 vis_prompt = test_prompts[prompt_idx] if test_prompts[prompt_idx] else "[empty prompt]"
 result = generate_text_with_predictors(model, tokenizer, test_prompts[prompt_idx], max_length=30, temperature=0.8)
 
-# Plot gate weights over generation steps
-plt.figure(figsize=(12, 6))
-weights_array = np.array(result['gate_weights'])
-steps = range(weights_array.shape[0])
-for p_idx in range(weights_array.shape[1]):
-    variant = ['standard', 'deep_narrow', 'wide_shallow', 'regularized'][p_idx % 4]
-    plt.plot(steps, weights_array[:, p_idx], 
-             label=f"Predictor {p_idx+1} ({variant})", 
-             marker='o', linewidth=2)
+if result['gate_weights']:
+    # Plot gate weights over generation steps
+    plt.figure(figsize=(12, 6))
+    weights_array = np.array(result['gate_weights'])
+    steps = range(weights_array.shape[0])
+    for p_idx in range(weights_array.shape[1]):
+        variant = ['standard', 'deep_narrow', 'wide_shallow', 'regularized'][p_idx % 4]
+        plt.plot(steps, weights_array[:, p_idx], 
+                 label=f"Predictor {p_idx+1} ({variant})", 
+                 marker='o', linewidth=2)
 
-plt.title(f"Predictor Contributions During Generation\nPrompt: '{vis_prompt}'")
-plt.xlabel("Generation Step")
-plt.ylabel("Gate Weight")
-plt.ylim(0, 1.0)
-plt.grid(True, alpha=0.3)
-plt.legend(loc='best')
-plt.savefig('output/predictor_contributions.png', dpi=300, bbox_inches='tight')
-
-print("Predictor contribution visualization saved to output/predictor_contributions.png")
+    plt.title(f"Predictor Contributions During Generation\nPrompt: '{vis_prompt}'")
+    plt.xlabel("Generation Step")
+    plt.ylabel("Gate Weight")
+    plt.ylim(0, 1.0)
+    plt.grid(True, alpha=0.3)
+    plt.legend(loc='best')
+    plt.savefig('output/predictor_contributions.png', dpi=300, bbox_inches='tight')
+    print("Predictor contribution visualization saved to output/predictor_contributions.png")
+else:
+    print("No gate weights collected during generation; skipping predictor contribution plot.")
 
 # --- Plotting Training Metrics ---
 print("\n## Generating Training Plots ##")
