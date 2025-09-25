@@ -1,106 +1,135 @@
-**Objective:** Modify the `ReservoirLayer` and `ReservoirLM` classes to incorporate three new optional features: a GRU-style gating mechanism, learnable head projections, and a hybrid attention/reservoir mode.
+Modify and edit the file predictorsAndAggregators.py. Use the venv present with `source venv/bin/activate` and then
+use `python3`.
 
-#### **Feature 1: Implement Gating Mechanism**
+I runned this code and does not have any error, but, this was the output:
+## Testing Enhanced Text Generation with Predictor Outputs ##
 
-1.  **Modify `ReservoirLayer.__init__`:**
+Test 1: Prompt: 'Once upon a time'
+Final Aggregated Output: Once upon a time , there was a boy named Timmy . Timmy loved to play with his toys
+Individual Predictor Outputs:
+  Predictor 1 (standard), Confidence: 0.555
+    Once upon a time flashy prickly hugs giant ort stumble h barber weighing barber trill handiwork planks bookshelves chewy
+  Predictor 2 (deep_narrow), Confidence: 0.669
+    Once upon a time Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa
+  Predictor 3 (wide_shallow), Confidence: 0.710
+    Once upon a time Roof ugs tam giant sandy ints ints expand Te expand safe bal slime brake drains
 
-      * Add a new boolean argument `use_gating=False`.
-      * Inside the `__init__` method, add the following conditional block to create the gating layer:
-        ```python
-        self.use_gating = use_gating
-        if self.use_gating:
-            self.gate_proj = nn.Linear(d_model, d_model)
-        ```
+Aggregator Weights by Position:
+  Pos 1: ['0.101', '0.151', '0.748']
+  Pos 2: ['0.631', '0.012', '0.357']
+  Pos 3: ['0.088', '0.323', '0.589']
+  Pos 4: ['0.469', '0.063', '0.469']
+  Pos 5: ['0.009', '0.033', '0.958']
+  Pos 6: ['0.348', '0.399', '0.253']
+  Pos 7: ['0.943', '0.010', '0.048']
+  Pos 8: ['0.201', '0.333', '0.465']
+  Pos 9: ['0.991', '0.002', '0.007']
+  Pos 10: ['0.188', '0.377', '0.435']
+  Pos 11: ['0.016', '0.019', '0.965']
+  Pos 12: ['0.505', '0.093', '0.401']
+  Pos 13: ['0.130', '0.190', '0.680']
+  Pos 14: ['0.479', '0.209', '0.312']
+  Pos 15: ['0.012', '0.046', '0.942']
+==================================================
 
-2.  **Modify `ReservoirLayer.forward`:**
+Test 2: Prompt: 'The little girl'
+Final Aggregated Output: The little girl was so excited that she wanted to find her friends . She wanted to buy
+Individual Predictor Outputs:
+  Predictor 1 (standard), Confidence: 0.466
+    The little girl irt hook Tiger tool Shapes Snowman ime huddled octop Match racket weighing farthest ime huddled
+  Predictor 2 (deep_narrow), Confidence: 0.669
+    The little girl Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa
+  Predictor 3 (wide_shallow), Confidence: 0.656
+    The little girl chop ache unt filthy cape rom mumbled bal recommends Match pt Te Ahchoo mumbled bal
 
-      * Locate the first residual connection line: `x = self.norm1(x + x_res)`.
-      * Replace it with the following conditional logic:
-        ```python
-        if self.use_gating:
-            g = torch.sigmoid(self.gate_proj(x))
-            x = self.norm1(x * (1 - g) + x_res * g)
-        else:
-            x = self.norm1(x + x_res)
-        ```
+Aggregator Weights by Position:
+  Pos 1: ['0.136', '0.480', '0.385']
+  Pos 2: ['0.493', '0.048', '0.458']
+  Pos 3: ['0.827', '0.069', '0.105']
+  Pos 4: ['0.163', '0.392', '0.445']
+  Pos 5: ['0.039', '0.197', '0.764']
+  Pos 6: ['0.287', '0.091', '0.622']
+  Pos 7: ['0.016', '0.009', '0.975']
+  Pos 8: ['0.501', '0.091', '0.407']
+  Pos 9: ['0.233', '0.089', '0.678']
+  Pos 10: ['0.482', '0.036', '0.482']
+  Pos 11: ['0.162', '0.122', '0.716']
+  Pos 12: ['0.499', '0.001', '0.499']
+  Pos 13: ['0.319', '0.087', '0.593']
+  Pos 14: ['0.013', '0.024', '0.963']
+  Pos 15: ['0.499', '0.090', '0.410']
+==================================================
 
------
+Test 3: Prompt: 'In the forest'
+Final Aggregated Output: In the forest . He was so happy that he forgot his way . Once upon a time
+Individual Predictor Outputs:
+  Predictor 1 (standard), Confidence: 0.459
+    In the forest tool weighing explosion giant Tiger bites helping axes roamed orders ime weighing sug fourth orders
+  Predictor 2 (deep_narrow), Confidence: 0.669
+    In the forest Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa
+  Predictor 3 (wide_shallow), Confidence: 0.533
+    In the forest intention Pre Sara giant unt unt cape rul touched drains memorable Pre cool dropping repeating
 
-#### **Feature 2: Implement Learnable Head Projections**
+Aggregator Weights by Position:
+  Pos 1: ['0.107', '0.706', '0.186']
+  Pos 2: ['0.991', '0.002', '0.007']
+  Pos 3: ['0.476', '0.124', '0.400']
+  Pos 4: ['0.487', '0.061', '0.452']
+  Pos 5: ['0.815', '0.082', '0.103']
+  Pos 6: ['0.320', '0.085', '0.595']
+  Pos 7: ['0.037', '0.193', '0.770']
+  Pos 8: ['0.419', '0.106', '0.475']
+  Pos 9: ['0.108', '0.295', '0.597']
+  Pos 10: ['0.012', '0.046', '0.942']
+  Pos 11: ['0.092', '0.240', '0.668']
+  Pos 12: ['0.974', '0.003', '0.023']
+  Pos 13: ['0.801', '0.021', '0.179']
+  Pos 14: ['0.580', '0.206', '0.214']
+  Pos 15: ['0.007', '0.017', '0.976']
+==================================================
 
-1.  **Modify `ReservoirLayer.__init__`:**
+Test 4: Prompt: ''
+Final Aggregated Output: and she went outside to her house . As she walked , she was looking
+Individual Predictor Outputs:
+  Predictor 1 (standard), Confidence: 0.457
+    orders Novel sport ime tool handiwork Match tool weighing tags Snowman pige prickly Snowman giant
+  Predictor 2 (deep_narrow), Confidence: 0.669
+    Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa Papa
+  Predictor 3 (wide_shallow), Confidence: 0.573
+    unknowingly flown rom memories knel bal Match intention Te Pa rom sparklers ugs rom ache
 
-      * Add a new boolean argument `use_head_projs=False`.
-      * Inside the `__init__` method, add the following conditional block to create the projection layers:
-        ```python
-        self.use_head_projs = use_head_projs
-        if self.use_head_projs:
-            self.head_projs = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(self.num_heads)])
-        ```
+Aggregator Weights by Position:
+  Pos 1: ['0.312', '0.518', '0.169']
+  Pos 2: ['0.449', '0.103', '0.449']
+  Pos 3: ['0.332', '0.070', '0.598']
+  Pos 4: ['0.068', '0.098', '0.834']
+  Pos 5: ['0.084', '0.389', '0.527']
+  Pos 6: ['0.536', '0.017', '0.446']
+  Pos 7: ['0.482', '0.036', '0.482']
+  Pos 8: ['0.148', '0.489', '0.363']
+  Pos 9: ['0.988', '0.003', '0.009']
+  Pos 10: ['0.817', '0.014', '0.169']
+  Pos 11: ['0.058', '0.058', '0.884']
+  Pos 12: ['0.129', '0.123', '0.748']
+  Pos 13: ['0.958', '0.021', '0.021']
+  Pos 14: ['0.327', '0.086', '0.587']
+  Pos 15: ['0.501', '0.048', '0.451']
+==================================================
 
-2.  **Modify `ReservoirLayer.forward`:**
+Enhanced text generation test completed!
 
-      * Inside the `for head in range(self.num_heads):` loop, identify the input to the reservoir multiplication. The input is `x`.
-      * Create a new variable `head_input = x`.
-      * Add a conditional block to apply the projection:
-        ```python
-        head_input = x
-        if self.use_head_projs:
-            head_input = self.head_projs[head](head_input)
-        ```
-      * Ensure the rest of the loop uses `head_input` for the sparse matrix multiplication instead of `x`. The line should look like this: `res_outputs.append(torch.sparse.mm(w_res_sub, head_input[:, i, :]))`.
+## Creating Predictor Contribution Visualizations ##
+Predictor contribution visualization saved to output/predictor_contributions.png
 
------
+## Generating Training Plots ##
+Training dashboard saved to output/training_dashboard.png
 
-#### **Feature 3: Implement Hybrid Attention/Reservoir Layer**
+## Loss Analysis ##
+Initial Loss: 26.9628
+Final Loss: 16.9569
+Total Improvement: 10.0059
+Recent Loss Variance (last 3 epochs): 0.018473
 
-1.  **Modify `ReservoirLayer.__init__`:**
 
-      * Add a new boolean argument `use_hybrid_mode=False`.
-      * Add a new integer argument `num_attn_heads=4`.
-      * Inside the `__init__` method, add the following conditional block. This will initialize a standard PyTorch multi-head attention module.
-        ```python
-        self.use_hybrid_mode = use_hybrid_mode
-        if self.use_hybrid_mode:
-            self.attention = nn.MultiheadAttention(d_model, num_attn_heads, dropout=dropout, batch_first=False)
-            # Adjust the output projection to combine both reservoir and attention outputs
-            self.out_proj = nn.Linear(d_model * 2, d_model)
-        else:
-            # The original projection for reservoir-only heads
-            self.out_proj = nn.Linear(d_model, d_model)
-        ```
-
-2.  **Modify `ReservoirLayer.forward`:**
-
-      * At the beginning of the `forward` method, create a causal attention mask. This is crucial for language modeling.
-        ```python
-        attn_mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
-        ```
-      * Wrap the entire existing reservoir head processing logic in `if not self.use_hybrid_mode:`.
-      * Create a new `if self.use_hybrid_mode:` block. Inside it, perform both the reservoir and attention calculations.
-          * **Reservoir part:** The same logic as before (averaging the heads).
-          * **Attention part:** Call the attention layer: `x_attn, _ = self.attention(x, x, x, attn_mask=attn_mask)`.
-          * **Combination:** Concatenate the results: `combined_output = torch.cat([x_res, x_attn], dim=-1)`.
-          * **Projection:** Apply the output projection: `x_res = self.out_proj(combined_output)`.
-      * The final structure of the `forward` method before the first residual connection should look like this:
-        ```python
-        # (Inside ReservoirLayer.forward)
-
-        # Reservoir processing (simplified logic from before)
-        accumulated_res = 0
-        for head in range(self.num_heads):
-            # ... logic to calculate x_res_head for each head ...
-            accumulated_res += x_res_head
-        x_res = self.activation(accumulated_res / self.num_heads)
-
-        if self.use_hybrid_mode:
-            attn_mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
-            x_attn, _ = self.attention(x, x, x, attn_mask=attn_mask)
-            combined_output = torch.cat([x_res, x_attn], dim=-1)
-            x_res = self.out_proj(combined_output) # Use the wider out_proj
-        else:
-            x_res = self.out_proj(x_res) # Use the original out_proj
-
-        # ... continue with the gating/residual connection logic ...
-        ```
-      * Finally, update the `ReservoirLM` class `__init__` method to pass these new boolean flags down to the `ReservoirLayer`s.
+It seems that some predictors are pretty useless. What can we do to maintain this architecture
+but enhance the performance of the model?

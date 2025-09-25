@@ -100,24 +100,43 @@ class DiverseTransformerLM(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_encoder = nn.Parameter(torch.zeros(1, max_len, d_model))
-        
+
+        def find_nearest_divisor(n, target):
+            if target <= 0:
+                return 1
+            while target > 0:
+                if n % target == 0:
+                    return target
+                target -= 1
+            return 1
+
         if variant == 'deep_narrow':
-            # More layers, fewer heads
-            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=max(1, num_heads//2), 
-                                                     batch_first=True, dropout=0.15)
-            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers+2)
+            # Deeper, slightly narrower
+            nhead = find_nearest_divisor(d_model, max(1, num_heads - 1))
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
+                                                     batch_first=True, dropout=0.2)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers + 1)
         elif variant == 'wide_shallow':
-            # Fewer layers, more heads
-            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads*2, 
-                                                     batch_first=True, dropout=0.05)
-            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=max(1, num_layers-1))
+            # Wider, slightly shallower
+            nhead = find_nearest_divisor(d_model, num_heads + 2)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
+                                                     batch_first=True, dropout=0.1)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=max(1, num_layers - 2))
+        elif variant == 'super_deep':
+            # Very deep to capture complex patterns
+            nhead = find_nearest_divisor(d_model, num_heads)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
+                                                     batch_first=True, dropout=0.25)
+            self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers + 4)
         elif variant == 'regularized':
             # Standard but with heavy regularization
-            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, 
-                                                     batch_first=True, dropout=0.25)
+            nhead = find_nearest_divisor(d_model, num_heads)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
+                                                     batch_first=True, dropout=0.3)
             self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         else:  # standard
-            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, batch_first=True)
+            nhead = find_nearest_divisor(d_model, num_heads)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
             self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
         self.head = nn.Linear(d_model, vocab_size)
@@ -138,7 +157,7 @@ class PredictorAggregatorLM(nn.Module):
         self.vocab_size = vocab_size
         
         # 1. Create diverse Predictor models with different architectures
-        variants = ['standard', 'deep_narrow', 'wide_shallow', 'regularized']
+        variants = ['standard', 'deep_narrow', 'wide_shallow', 'regularized', 'super_deep']
         self.predictors = nn.ModuleList([
             DiverseTransformerLM(vocab_size, d_model, num_heads, num_layers, max_len, 
                                variant=variants[i % len(variants)])
