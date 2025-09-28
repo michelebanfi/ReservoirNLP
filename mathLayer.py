@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 # --- Configuration Flag ---
 # Set to True for quick local testing, False for full training on GPU
-LOCAL_TESTING = True
+LOCAL_TESTING = False
 
 @dataclass
 class ModelConfig:
