@@ -24,6 +24,7 @@ class ModelConfig:
     LEARNING_RATE: float
     NUM_TRAIN_STEPS: int  # How many batches to train on
     LOG_INTERVAL: int  # Print loss every N steps
+    DATASET_SIZE: int  # Maximum number of examples to use for training
 
 # Small model configuration for local testing
 LOCAL_CONFIG = ModelConfig(
@@ -36,7 +37,8 @@ LOCAL_CONFIG = ModelConfig(
     BATCH_SIZE=8,
     LEARNING_RATE=3e-4,
     NUM_TRAIN_STEPS=100,
-    LOG_INTERVAL=20
+    LOG_INTERVAL=20,
+    DATASET_SIZE=500  # Small dataset for quick testing
 )
 
 # Larger model configuration for training on GPU
@@ -50,7 +52,8 @@ FULL_CONFIG = ModelConfig(
     BATCH_SIZE=16,
     LEARNING_RATE=3e-4,
     NUM_TRAIN_STEPS=500,
-    LOG_INTERVAL=50
+    LOG_INTERVAL=50,
+    DATASET_SIZE=20000  # Larger dataset for full training
 )
 
 # Select config based on LOCAL_TESTING flag
@@ -67,6 +70,7 @@ BATCH_SIZE = CONFIG.BATCH_SIZE
 LEARNING_RATE = CONFIG.LEARNING_RATE
 NUM_TRAIN_STEPS = CONFIG.NUM_TRAIN_STEPS
 LOG_INTERVAL = CONFIG.LOG_INTERVAL
+DATASET_SIZE = CONFIG.DATASET_SIZE
 
 # --- 1. The Custom Mathematical Operator Block ---
 # This block has no learnable parameters. Its purpose is to apply fixed,
@@ -230,29 +234,26 @@ def collate_fn(batch):
 # --- Alternative data loading approach to avoid threading issues ---
 def load_data_directly(tokenizer, batch_size, num_steps, max_length=BLOCK_SIZE):
     """Load data directly without using DataLoader to avoid threading issues"""
-    # Load a small dataset in memory
-    dataset = load_dataset("roneneldan/TinyStories", split="train", streaming=True)
+    # Load dataset with explicit size limit based on configuration
+    dataset = load_dataset("roneneldan/TinyStories", split=f"train[:{DATASET_SIZE}]", streaming=False)
     data = []
     
-    # Collect enough examples
-    for i, example in enumerate(dataset):
-        if i >= batch_size * num_steps:
-            break
-        
+    # Process all loaded examples
+    for example in dataset:
         text = example['text']
         tokens = tokenizer.encode(text, return_tensors="pt", max_length=max_length, truncation=True)[0]
         if len(tokens) < 2:
             continue
             
         data.append((tokens[:-1], tokens[1:]))
-        
+    
     # Process data in batches
     batches = []
     for i in range(0, len(data), batch_size):
         batch_data = data[i:i+batch_size]
         if not batch_data:
             continue
-            
+        
         inputs = [item[0] for item in batch_data]
         targets = [item[1] for item in batch_data]
         
@@ -285,6 +286,9 @@ def main():
         num_layers=NUM_LAYERS
     ).to(device)
     print(f"Model has {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters.")
+    print(f"Using {'LOCAL' if LOCAL_TESTING else 'FULL'} configuration:")
+    print(f"  - Dataset size: {DATASET_SIZE} examples")
+    print(f"  - Model size: EMBED_DIM={EMBED_DIM}, NUM_LAYERS={NUM_LAYERS}, NUM_HEADS={NUM_HEADS}")
 
     # Check which parameters are trainable (to verify math block is excluded)
     print("\nVerifying trainable parameters (math_block should be absent):")
