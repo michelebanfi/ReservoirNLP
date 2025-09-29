@@ -44,14 +44,14 @@ LOCAL_CONFIG = ModelConfig(
 # Larger model configuration for training on GPU
 FULL_CONFIG = ModelConfig(
     VOCAB_SIZE=10000,
-    EMBED_DIM=128,
+    EMBED_DIM=256,
     NUM_HEADS=4,
     NUM_LAYERS=3,
     BLOCK_SIZE=128,
     DROPOUT=0.1,
     BATCH_SIZE=16,
     LEARNING_RATE=3e-4,
-    NUM_TRAIN_STEPS=500,
+    NUM_TRAIN_STEPS=1000,
     LOG_INTERVAL=50,
     DATASET_SIZE=20000  # Larger dataset for full training
 )
