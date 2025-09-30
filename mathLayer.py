@@ -154,7 +154,7 @@ class TransformerBlock(nn.Module):
         self.ln_2 = nn.LayerNorm(embed_dim)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, 4 * embed_dim),
-            nn.GELU(),
+            nn.SiLU(),
             nn.Linear(4 * embed_dim, embed_dim),
         )
         # --- HERE IS THE INTEGRATION OF YOUR IDEA ---
@@ -174,7 +174,27 @@ class TransformerBlock(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-# --- 3. The Full Model ---
+# --- Standard Transformer Block (without Math Layer) ---
+class StandardTransformerBlock(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super().__init__()
+        self.ln_1 = nn.LayerNorm(embed_dim)
+        self.attn = CausalSelfAttention(embed_dim, num_heads)
+        self.ln_2 = nn.LayerNorm(embed_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, 4 * embed_dim),
+            nn.GELU(),
+            nn.Linear(4 * embed_dim, embed_dim),
+        )
+
+    def forward(self, x):
+        # Standard attention path with residual connection
+        x = x + self.attn(self.ln_1(x))
+        # Standard MLP path with residual connection
+        x = x + self.mlp(self.ln_2(x))
+        return x
+
+# --- 3. The Full Models ---
 
 class TinyTransformer(nn.Module):
     def __init__(self, vocab_size, embed_dim, num_heads, num_layers):
@@ -182,6 +202,30 @@ class TinyTransformer(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, embed_dim)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, embed_dim)
         self.blocks = nn.Sequential(*[TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)])
+        self.ln_f = nn.LayerNorm(embed_dim)
+        self.lm_head = nn.Linear(embed_dim, vocab_size)
+
+    def forward(self, idx, targets=None):
+        B, T = idx.size()
+        tok_emb = self.token_embedding_table(idx) # (B, T, C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device)) # (T, C)
+        x = tok_emb + pos_emb
+        x = self.blocks(x)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+
+        return logits, loss
+
+class StandardTransformer(nn.Module):
+    def __init__(self, vocab_size, embed_dim, num_heads, num_layers):
+        super().__init__()
+        self.token_embedding_table = nn.Embedding(vocab_size, embed_dim)
+        self.position_embedding_table = nn.Embedding(BLOCK_SIZE, embed_dim)
+        self.blocks = nn.Sequential(*[StandardTransformerBlock(embed_dim, num_heads) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
@@ -264,10 +308,58 @@ def load_data_directly(tokenizer, batch_size, num_steps, max_length=BLOCK_SIZE):
     
     return batches
 
+# --- Evaluation Utilities ---
+def calculate_perplexity(model, data_batches, device):
+    """Calculate perplexity on a dataset"""
+    model.eval()
+    total_loss = 0
+    total_tokens = 0
+    
+    with torch.no_grad():
+        for inputs, targets in data_batches:
+            inputs, targets = inputs.to(device), targets.to(device)
+            _, loss = model(inputs, targets)
+            
+            # Count non-padding tokens
+            non_pad_mask = (targets != -1)
+            num_tokens = non_pad_mask.sum().item()
+            
+            total_loss += loss.item() * num_tokens
+            total_tokens += num_tokens
+    
+    # Perplexity = exp(average negative log-likelihood)
+    avg_loss = total_loss / total_tokens
+    perplexity = math.exp(avg_loss)
+    
+    return perplexity
+
+def compare_models(math_model, std_model, tokenizer, prompt, device, max_new_tokens=40):
+    """Generate text using both models and show them side by side"""
+    # Generate with Math model
+    start_time = torch.cuda.Event(enable_timing=True)
+    end_time = torch.cuda.Event(enable_timing=True)
+    
+    start_time.record()
+    math_text = generate_text(math_model, tokenizer, prompt, max_new_tokens, device=device)
+    end_time.record()
+    torch.cuda.synchronize()
+    math_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
+    
+    # Generate with Standard model
+    start_time.record()
+    std_text = generate_text(std_model, tokenizer, prompt, max_new_tokens, device=device)
+    end_time.record()
+    torch.cuda.synchronize()
+    std_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
+    
+    print(f"=== Generation Comparison (Prompt: '{prompt}') ===")
+    print(f"Math Model ({math_time:.3f}s): '{math_text}'")
+    print(f"Std Model ({std_time:.3f}s): '{std_text}'")
+
 # --- 5. Main Training Script ---
 
 def main():
-    print("--- Starting Proof-of-Concept Test ---")
+    print("--- Starting Comparison Test: Math vs Standard Transformer ---")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
 
@@ -277,39 +369,112 @@ def main():
     tokenizer.pad_token = tokenizer.eos_token
     effective_vocab_size = tokenizer.vocab_size
 
-    # Set up model
-    print("Initializing model...")
-    model = TinyTransformer(
+    # Set up both models
+    print("Initializing models...")
+    math_model = TinyTransformer(
         vocab_size=effective_vocab_size,
         embed_dim=EMBED_DIM,
         num_heads=NUM_HEADS,
         num_layers=NUM_LAYERS
     ).to(device)
-    print(f"Model has {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters.")
+    
+    std_model = StandardTransformer(
+        vocab_size=effective_vocab_size,
+        embed_dim=EMBED_DIM,
+        num_heads=NUM_HEADS,
+        num_layers=NUM_LAYERS
+    ).to(device)
+    
+    print(f"Math Model has {sum(p.numel() for p in math_model.parameters() if p.requires_grad):,} trainable parameters.")
+    print(f"Standard Model has {sum(p.numel() for p in std_model.parameters() if p.requires_grad):,} trainable parameters.")
     print(f"Using {'LOCAL' if LOCAL_TESTING else 'FULL'} configuration:")
     print(f"  - Dataset size: {DATASET_SIZE} examples")
     print(f"  - Model size: EMBED_DIM={EMBED_DIM}, NUM_LAYERS={NUM_LAYERS}, NUM_HEADS={NUM_HEADS}")
 
-    # Check which parameters are trainable (to verify math block is excluded)
-    print("\nVerifying trainable parameters (math_block should be absent):")
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            print(f"  - {name} (Not Trainable)")
-
-    # Set up data directly without DataLoader
+    # Load data once and reuse for both models
     print("\nLoading data directly for TinyStories...")
     batches = load_data_directly(tokenizer, BATCH_SIZE, NUM_TRAIN_STEPS)
+    
+    # Split batches for training and evaluation
+    train_ratio = 0.9
+    train_size = int(len(batches) * train_ratio)
+    train_batches = batches[:train_size]
+    eval_batches = batches[train_size:]
+    
+    # Store metrics for comparison
+    model_metrics = {
+        'math_model': {'train_losses': [], 'train_time': 0, 'perplexity': 0},
+        'std_model': {'train_losses': [], 'train_time': 0, 'perplexity': 0}
+    }
 
-    # Set up optimizer
+    # --- Train Math Model ---
+    print("\n=== Training Math-Augmented Transformer ===")
+    model_metrics['math_model'] = train_model(math_model, train_batches, eval_batches, device)
+    
+    # --- Train Standard Model ---
+    print("\n=== Training Standard Transformer ===")
+    model_metrics['std_model'] = train_model(std_model, train_batches, eval_batches, device)
+    
+    # --- Compare Results ---
+    print("\n=== Comparison Results ===")
+    print(f"Math Model - Training time: {model_metrics['math_model']['train_time']:.2f}s, "
+          f"Final Loss: {model_metrics['math_model']['train_losses'][-1]:.4f}, "
+          f"Perplexity: {model_metrics['math_model']['perplexity']:.2f}")
+          
+    print(f"Standard Model - Training time: {model_metrics['std_model']['train_time']:.2f}s, "
+          f"Final Loss: {model_metrics['std_model']['train_losses'][-1]:.4f}, "
+          f"Perplexity: {model_metrics['std_model']['perplexity']:.2f}")
+    
+    # Compare generated text
+    prompts = [
+        "Once upon a time", 
+        "The little dog", 
+        "In a world where"
+    ]
+    
+    for prompt in prompts:
+        compare_models(math_model, std_model, tokenizer, prompt, device)
+    
+    # Plot training losses if available
+    try:
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 6))
+        plt.plot(model_metrics['math_model']['train_losses'], label='Math Model')
+        plt.plot(model_metrics['std_model']['train_losses'], label='Standard Model')
+        plt.xlabel('Training Steps')
+        plt.ylabel('Loss')
+        plt.title('Training Loss Comparison')
+        plt.legend()
+        plt.savefig('loss_comparison.png')
+        print("\nSaved training loss comparison chart to 'loss_comparison.png'")
+    except ImportError:
+        print("\nMatplotlib not available - skipping loss plot generation")
+    
+    # Force cleanup
+    import gc
+    del batches, math_model, std_model
+    gc.collect()
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    
+    print("\n--- Comparison Finished ---")
+    sys.exit(0)
+
+def train_model(model, train_batches, eval_batches, device):
+    """Train a model and return metrics"""
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-
+    
+    # Initialize metrics
+    metrics = {'train_losses': [], 'train_time': 0, 'perplexity': 0}
+    
     # Training loop
-    print("\n--- Starting Training ---")
     model.train()
-    step_count = 0
     total_loss = 0
-
-    for inputs, targets in batches:
+    step_count = 0
+    
+    # Timing
+    start_time = time.time()
+    
+    for inputs, targets in train_batches:
         inputs, targets = inputs.to(device), targets.to(device)
 
         # Forward pass
@@ -320,34 +485,25 @@ def main():
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
+        loss_val = loss.item()
+        total_loss += loss_val
+        metrics['train_losses'].append(loss_val)
         step_count += 1
 
         if step_count % LOG_INTERVAL == 0:
             avg_loss = total_loss / LOG_INTERVAL
-            print(f"Step {step_count}/{len(batches)} | Loss: {avg_loss:.4f}")
+            print(f"Step {step_count}/{len(train_batches)} | Loss: {avg_loss:.4f}")
             total_loss = 0
-
-    print("\n--- Training Finished ---")
-    print("The loss decreased, indicating the model is trainable and gradients are flowing correctly.")
-    print("The experiment successfully demonstrates the architectural concept.")
     
-    # Test generation from a prompt
-    print("\n--- Testing Text Generation ---")
-    prompt = "Once upon a time"
-    print(f"Prompt: '{prompt}'")
-    generated_text = generate_text(model, tokenizer, prompt, max_new_tokens=40, device=device)
-    print(f"Generated: '{generated_text}'")
+    # Record training time
+    metrics['train_time'] = time.time() - start_time
     
-    # Force cleanup
-    import gc
-    del batches, model, optimizer
-    gc.collect()
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    # Calculate perplexity on eval set
+    perplexity = calculate_perplexity(model, eval_batches, device)
+    metrics['perplexity'] = perplexity
+    print(f"Evaluation - Perplexity: {perplexity:.2f}")
     
-    # Exit explicitly to avoid thread issues
-    import sys
-    sys.exit(0)
+    return metrics
 
 # --- Text Generation Functions ---
 def generate_text(model, tokenizer, prompt, max_new_tokens=40, temperature=0.8, device='cpu'):
@@ -391,5 +547,9 @@ if __name__ == '__main__':
     # Hugging Face tokenizers can cause issues with multiprocessing on some systems.
     # This environment variable helps prevent potential deadlocks.
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    
+    # For timing measurements
+    import time
+    import sys
     
     main()
