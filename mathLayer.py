@@ -51,7 +51,7 @@ FULL_CONFIG = ModelConfig(
     DROPOUT=0.1,
     BATCH_SIZE=16,
     LEARNING_RATE=3e-4,
-    NUM_TRAIN_STEPS=1000,
+    NUM_TRAIN_STEPS=10000,
     LOG_INTERVAL=50,
     DATASET_SIZE=20000  # Larger dataset for full training
 )
