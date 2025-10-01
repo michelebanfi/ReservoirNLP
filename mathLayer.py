@@ -10,7 +10,9 @@ from dataclasses import dataclass
 
 # --- Configuration Flag ---
 # Set to True for quick local testing, False for full training on GPU
-LOCAL_TESTING = False
+LOCAL_TESTING = True
+# Set to 'math' for SimpleMath dataset, 'story' for TinyStories dataset
+TASK_TYPE = 'math'  # Options: 'math' or 'story'
 
 @dataclass
 class ModelConfig:
@@ -275,6 +277,141 @@ def collate_fn(batch):
     targets_padded = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True, padding_value=-1) # use -1 for ignore_index
     return inputs_padded, targets_padded
 
+# --- SimpleMath Dataset Handler ---
+class SimpleMathDataset:
+    """Dataset handler for the SimpleMath arithmetic dataset"""
+    def __init__(self, tokenizer, split='train', max_length=BLOCK_SIZE):
+        # Load the dataset
+        self.dataset = load_dataset("ProCreations/SimpleMath", split=split)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # Handle different column name possibilities
+        if 'instruction' in item:
+            question = item['instruction']
+            answer = str(item['output'])
+        elif 'text' in item:
+            text = item['text']
+            parts = text.split('=')
+            if len(parts) == 2:
+                question = parts[0].strip() + ' ='
+                answer = parts[1].strip()
+            else:
+                return None
+        else:
+            # Use first two columns
+            cols = list(item.keys())
+            if len(cols) >= 2:
+                question = str(item[cols[0]])
+                answer = str(item[cols[1]])
+            else:
+                return None
+        
+        # Create input-output pair
+        full_text = f"{question} {answer}"
+        
+        # Tokenize
+        tokens = self.tokenizer.encode(full_text, return_tensors="pt", 
+                                      max_length=self.max_length, truncation=True)[0]
+        
+        if len(tokens) < 2:
+            return None
+            
+        return tokens[:-1], tokens[1:], answer  # input, target, numeric_answer
+    
+    def get_batch(self, batch_size):
+        """Get a batch of data"""
+        batch_data = []
+        for i in range(batch_size):
+            if i < len(self.dataset):
+                item = self.__getitem__(i)
+                if item is not None:
+                    batch_data.append(item)
+        return batch_data
+
+def load_simple_math_data(tokenizer, batch_size, max_length=BLOCK_SIZE):
+    """Load SimpleMath dataset and prepare batches"""
+    # Load dataset with size limit
+    dataset = load_dataset("ProCreations/SimpleMath", split=f"train[:{DATASET_SIZE}]")
+    data = []
+    
+    # Print column names to debug
+    if len(dataset) > 0:
+        print(f"Dataset columns: {dataset.column_names}")
+        print(f"First example: {dataset[0]}")
+    
+    for example in dataset:
+        # The dataset has columns based on the structure shown in the attachment
+        # It appears to be a simple format with the math problem and answer
+        # Try to access the actual column names
+        if 'instruction' in example:
+            question = example['instruction']
+            answer = str(example['output'])
+        elif 'text' in example:
+            # Sometimes datasets have 'text' column
+            text = example['text']
+            # Parse text to extract question and answer
+            parts = text.split('=')
+            if len(parts) == 2:
+                question = parts[0].strip() + ' ='
+                answer = parts[1].strip()
+            else:
+                continue
+        else:
+            # Try to find the first two columns (likely question and answer)
+            cols = list(example.keys())
+            if len(cols) >= 2:
+                question = str(example[cols[0]])
+                answer = str(example[cols[1]])
+            else:
+                print(f"Warning: Unknown dataset format. Columns: {cols}")
+                continue
+        
+        # Format the text as "question answer"
+        full_text = f"{question} {answer}"
+        
+        # Tokenize
+        tokens = tokenizer.encode(full_text, return_tensors="pt", 
+                                 max_length=max_length, truncation=True)[0]
+        
+        if len(tokens) < 2:
+            continue
+        
+        # Store (input, target, numeric_answer)
+        try:
+            numeric_answer = int(''.join(filter(str.isdigit, answer)))
+        except ValueError:
+            # If we can't parse the answer as int, skip this example
+            continue
+            
+        data.append((tokens[:-1], tokens[1:], numeric_answer))
+    
+    print(f"Loaded {len(data)} examples from SimpleMath dataset")
+    
+    # Create batches
+    batches = []
+    for i in range(0, len(data), batch_size):
+        batch_data = data[i:i+batch_size]
+        if not batch_data:
+            continue
+        
+        inputs = [item[0] for item in batch_data]
+        targets = [item[1] for item in batch_data]
+        answers = [item[2] for item in batch_data]
+        
+        inputs_padded = torch.nn.utils.rnn.pad_sequence(inputs, batch_first=True, padding_value=0)
+        targets_padded = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True, padding_value=-1)
+        
+        batches.append((inputs_padded, targets_padded, answers))
+    
+    return batches
+
 # --- Alternative data loading approach to avoid threading issues ---
 def load_data_directly(tokenizer, batch_size, num_steps, max_length=BLOCK_SIZE):
     """Load data directly without using DataLoader to avoid threading issues"""
@@ -309,6 +446,70 @@ def load_data_directly(tokenizer, batch_size, num_steps, max_length=BLOCK_SIZE):
     return batches
 
 # --- Evaluation Utilities ---
+def extract_number_from_tokens(tokens, tokenizer):
+    """Extract the first number from a sequence of tokens"""
+    text = tokenizer.decode(tokens, skip_special_tokens=True)
+    # Extract numbers from text
+    import re
+    numbers = re.findall(r'\d+', text)
+    if numbers:
+        try:
+            return int(numbers[0])
+        except ValueError:
+            return None
+    return None
+
+def calculate_math_accuracy(model, data_batches, tokenizer, device):
+    """Calculate numerical accuracy for math predictions"""
+    model.eval()
+    total_distance = 0
+    total_correct = 0
+    total_samples = 0
+    distances = []
+    
+    with torch.no_grad():
+        for batch_data in data_batches:
+            if len(batch_data) == 3:  # Math dataset with answers
+                inputs, targets, true_answers = batch_data
+            else:
+                continue
+                
+            inputs = inputs.to(device)
+            logits, _ = model(inputs)
+            
+            # Get predicted tokens (greedy decoding)
+            predicted_tokens = torch.argmax(logits, dim=-1)
+            
+            # For each sample in batch
+            for i in range(len(true_answers)):
+                pred_tokens = predicted_tokens[i].cpu().tolist()
+                predicted_num = extract_number_from_tokens(pred_tokens, tokenizer)
+                true_num = true_answers[i]
+                
+                if predicted_num is not None:
+                    distance = abs(predicted_num - true_num)
+                    total_distance += distance
+                    distances.append(distance)
+                    
+                    if predicted_num == true_num:
+                        total_correct += 1
+                
+                total_samples += 1
+    
+    if total_samples == 0:
+        return {'accuracy': 0, 'avg_distance': 0, 'distances': []}
+    
+    accuracy = (total_correct / total_samples) * 100
+    avg_distance = total_distance / total_samples
+    
+    return {
+        'accuracy': accuracy,
+        'avg_distance': avg_distance,
+        'distances': distances,
+        'total_samples': total_samples,
+        'total_correct': total_correct
+    }
+
 def calculate_perplexity(model, data_batches, device):
     """Calculate perplexity on a dataset"""
     model.eval()
@@ -316,7 +517,13 @@ def calculate_perplexity(model, data_batches, device):
     total_tokens = 0
     
     with torch.no_grad():
-        for inputs, targets in data_batches:
+        for batch_data in data_batches:
+            # Handle both story and math batches
+            if len(batch_data) == 3:  # Math dataset
+                inputs, targets, _ = batch_data
+            else:  # Story dataset
+                inputs, targets = batch_data
+                
             inputs, targets = inputs.to(device), targets.to(device)
             _, loss = model(inputs, targets)
             
@@ -335,22 +542,34 @@ def calculate_perplexity(model, data_batches, device):
 
 def compare_models(math_model, std_model, tokenizer, prompt, device, max_new_tokens=40):
     """Generate text using both models and show them side by side"""
+    import time
+    
     # Generate with Math model
-    start_time = torch.cuda.Event(enable_timing=True)
-    end_time = torch.cuda.Event(enable_timing=True)
-    
-    start_time.record()
-    math_text = generate_text(math_model, tokenizer, prompt, max_new_tokens, device=device)
-    end_time.record()
-    torch.cuda.synchronize()
-    math_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
-    
-    # Generate with Standard model
-    start_time.record()
-    std_text = generate_text(std_model, tokenizer, prompt, max_new_tokens, device=device)
-    end_time.record()
-    torch.cuda.synchronize()
-    std_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
+    if device == 'cuda':
+        start_time = torch.cuda.Event(enable_timing=True)
+        end_time = torch.cuda.Event(enable_timing=True)
+        
+        start_time.record()
+        math_text = generate_text(math_model, tokenizer, prompt, max_new_tokens, device=device)
+        end_time.record()
+        torch.cuda.synchronize()
+        math_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
+        
+        # Generate with Standard model
+        start_time.record()
+        std_text = generate_text(std_model, tokenizer, prompt, max_new_tokens, device=device)
+        end_time.record()
+        torch.cuda.synchronize()
+        std_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
+    else:
+        # Use time.time() for CPU
+        start = time.time()
+        math_text = generate_text(math_model, tokenizer, prompt, max_new_tokens, device=device)
+        math_time = time.time() - start
+        
+        start = time.time()
+        std_text = generate_text(std_model, tokenizer, prompt, max_new_tokens, device=device)
+        std_time = time.time() - start
     
     print(f"=== Generation Comparison (Prompt: '{prompt}') ===")
     print(f"Math Model ({math_time:.3f}s): '{math_text}'")
@@ -360,6 +579,7 @@ def compare_models(math_model, std_model, tokenizer, prompt, device, max_new_tok
 
 def main():
     print("--- Starting Comparison Test: Math vs Standard Transformer ---")
+    print(f"Task Type: {TASK_TYPE}")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
 
@@ -391,9 +611,13 @@ def main():
     print(f"  - Dataset size: {DATASET_SIZE} examples")
     print(f"  - Model size: EMBED_DIM={EMBED_DIM}, NUM_LAYERS={NUM_LAYERS}, NUM_HEADS={NUM_HEADS}")
 
-    # Load data once and reuse for both models
-    print("\nLoading data directly for TinyStories...")
-    batches = load_data_directly(tokenizer, BATCH_SIZE, NUM_TRAIN_STEPS)
+    # Load data based on task type
+    if TASK_TYPE == 'math':
+        print("\nLoading SimpleMath dataset...")
+        batches = load_simple_math_data(tokenizer, BATCH_SIZE)
+    else:
+        print("\nLoading TinyStories dataset...")
+        batches = load_data_directly(tokenizer, BATCH_SIZE, NUM_TRAIN_STEPS)
     
     # Split batches for training and evaluation
     train_ratio = 0.9
@@ -409,35 +633,52 @@ def main():
 
     # --- Train Math Model ---
     print("\n=== Training Math-Augmented Transformer ===")
-    model_metrics['math_model'] = train_model(math_model, train_batches, eval_batches, device)
+    model_metrics['math_model'] = train_model(math_model, train_batches, eval_batches, device, tokenizer)
     
     # --- Train Standard Model ---
     print("\n=== Training Standard Transformer ===")
-    model_metrics['std_model'] = train_model(std_model, train_batches, eval_batches, device)
+    model_metrics['std_model'] = train_model(std_model, train_batches, eval_batches, device, tokenizer)
     
     # --- Compare Results ---
     print("\n=== Comparison Results ===")
     print(f"Math Model - Training time: {model_metrics['math_model']['train_time']:.2f}s, "
           f"Final Loss: {model_metrics['math_model']['train_losses'][-1]:.4f}, "
           f"Perplexity: {model_metrics['math_model']['perplexity']:.2f}")
+    
+    if TASK_TYPE == 'math' and 'math_accuracy' in model_metrics['math_model']:
+        math_acc = model_metrics['math_model']['math_accuracy']
+        print(f"  Math Accuracy: {math_acc['accuracy']:.2f}%, Avg Distance: {math_acc['avg_distance']:.2f}")
           
     print(f"Standard Model - Training time: {model_metrics['std_model']['train_time']:.2f}s, "
           f"Final Loss: {model_metrics['std_model']['train_losses'][-1]:.4f}, "
           f"Perplexity: {model_metrics['std_model']['perplexity']:.2f}")
     
+    if TASK_TYPE == 'math' and 'math_accuracy' in model_metrics['std_model']:
+        std_acc = model_metrics['std_model']['math_accuracy']
+        print(f"  Math Accuracy: {std_acc['accuracy']:.2f}%, Avg Distance: {std_acc['avg_distance']:.2f}")
+    
     # Compare generated text
-    prompts = [
-        "Once upon a time", 
-        "The little dog", 
-        "In a world where"
-    ]
+    if TASK_TYPE == 'math':
+        prompts = [
+            "45 + 60 =",
+            "123 + 456 =",
+            "1000 + 2000 ="
+        ]
+    else:
+        prompts = [
+            "Once upon a time", 
+            "The little dog", 
+            "In a world where"
+        ]
     
     for prompt in prompts:
         compare_models(math_model, std_model, tokenizer, prompt, device)
     
-    # Plot training losses if available
+    # Plot training losses and math metrics if available
     try:
         import matplotlib.pyplot as plt
+        
+        # Training loss comparison
         plt.figure(figsize=(10, 6))
         plt.plot(model_metrics['math_model']['train_losses'], label='Math Model')
         plt.plot(model_metrics['std_model']['train_losses'], label='Standard Model')
@@ -447,8 +688,31 @@ def main():
         plt.legend()
         plt.savefig('loss_comparison.png')
         print("\nSaved training loss comparison chart to 'loss_comparison.png'")
+        
+        # If math task, plot distance distributions
+        if TASK_TYPE == 'math':
+            if 'math_accuracy' in model_metrics['math_model'] and 'math_accuracy' in model_metrics['std_model']:
+                plt.figure(figsize=(12, 5))
+                
+                plt.subplot(1, 2, 1)
+                plt.hist(model_metrics['math_model']['math_accuracy']['distances'], bins=50, alpha=0.7, label='Math Model')
+                plt.xlabel('Distance from True Answer')
+                plt.ylabel('Frequency')
+                plt.title('Math Model: Prediction Distance Distribution')
+                plt.legend()
+                
+                plt.subplot(1, 2, 2)
+                plt.hist(model_metrics['std_model']['math_accuracy']['distances'], bins=50, alpha=0.7, label='Standard Model', color='orange')
+                plt.xlabel('Distance from True Answer')
+                plt.ylabel('Frequency')
+                plt.title('Standard Model: Prediction Distance Distribution')
+                plt.legend()
+                
+                plt.tight_layout()
+                plt.savefig('math_accuracy_comparison.png')
+                print("Saved math accuracy comparison chart to 'math_accuracy_comparison.png'")
     except ImportError:
-        print("\nMatplotlib not available - skipping loss plot generation")
+        print("\nMatplotlib not available - skipping plot generation")
     
     # Force cleanup
     import gc
@@ -459,7 +723,7 @@ def main():
     print("\n--- Comparison Finished ---")
     sys.exit(0)
 
-def train_model(model, train_batches, eval_batches, device):
+def train_model(model, train_batches, eval_batches, device, tokenizer):
     """Train a model and return metrics"""
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     
@@ -474,7 +738,13 @@ def train_model(model, train_batches, eval_batches, device):
     # Timing
     start_time = time.time()
     
-    for inputs, targets in train_batches:
+    for batch_data in train_batches:
+        # Handle both story and math batches
+        if len(batch_data) == 3:  # Math dataset
+            inputs, targets, _ = batch_data
+        else:  # Story dataset
+            inputs, targets = batch_data
+            
         inputs, targets = inputs.to(device), targets.to(device)
 
         # Forward pass
@@ -502,6 +772,14 @@ def train_model(model, train_batches, eval_batches, device):
     perplexity = calculate_perplexity(model, eval_batches, device)
     metrics['perplexity'] = perplexity
     print(f"Evaluation - Perplexity: {perplexity:.2f}")
+    
+    # If math task, calculate math-specific metrics
+    if TASK_TYPE == 'math':
+        math_metrics = calculate_math_accuracy(model, eval_batches, tokenizer, device)
+        metrics['math_accuracy'] = math_metrics
+        print(f"Math Accuracy: {math_metrics['accuracy']:.2f}% | "
+              f"Avg Distance: {math_metrics['avg_distance']:.2f} | "
+              f"Correct: {math_metrics['total_correct']}/{math_metrics['total_samples']}")
     
     return metrics
 

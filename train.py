@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Dict, List, Tuple, Any, Optional
+from datasets import load_dataset
 import numpy as np
 
 # Training with reservoirpy uses NumPy arrays. We precompute embeddings and
@@ -299,3 +300,97 @@ def evaluate_mse(model, val_loader, embeddings: np.ndarray, max_batches: int = 1
         if i + 1 >= max_batches:
             break
     return float(np.mean(losses) if losses else 0.0)
+
+
+def load_data(config):
+    """Load dataset based on configuration."""
+    if config.USE_MATH_DATASET:
+        print("Loading simple-math dataset...")
+        dataset = load_dataset("fblgit/simple-math")
+        
+        # Process math dataset - extract question and answer
+        def process_math_example(example):
+            return {
+                'text': example['instruction'],  # The math problem
+                'label': float(example['output'])  # The numerical answer
+            }
+        
+        dataset = dataset.map(process_math_example)
+        
+        # Split into train/validation if needed
+        if 'validation' not in dataset:
+            dataset = dataset['train'].train_test_split(test_size=0.1, seed=config.SEED)
+        
+        return dataset['train'], dataset.get('validation') or dataset['test']
+    else:
+        print("Loading WikiText dataset...")
+        dataset = load_dataset('wikitext', 'wikitext-2-raw-v1')
+        return dataset['train'], dataset['validation']
+
+
+def calculate_prediction_distance(predictions, labels):
+    """Calculate the absolute distance between predictions and labels for math tasks."""
+    distances = np.abs(predictions - labels)
+    return {
+        'mean_distance': np.mean(distances),
+        'median_distance': np.median(distances),
+        'max_distance': np.max(distances),
+        'std_distance': np.std(distances)
+    }
+
+
+def train_and_evaluate():
+    config = Config()
+    
+    # Load appropriate dataset
+    train_data, val_data = load_data(config)
+    
+    # ...existing code for model initialization...
+    
+    # Training history with distance metrics
+    history = {
+        'reservoir_model': {'loss': [], 'distances': []},
+        'standard_model': {'loss': [], 'distances': []}
+    }
+    
+    for epoch in range(config.EPOCHS):
+        # ...existing training code...
+        
+        if config.USE_MATH_DATASET:
+            # Extract predictions and labels for distance calculation
+            reservoir_preds = []
+            standard_preds = []
+            true_labels = []
+            
+            for batch in val_data:
+                # ...existing prediction code...
+                
+                # Store predictions and labels
+                reservoir_preds.extend(reservoir_predictions)
+                standard_preds.extend(standard_predictions)
+                true_labels.extend(batch['label'])
+            
+            # Calculate distances
+            reservoir_distances = calculate_prediction_distance(
+                np.array(reservoir_preds), 
+                np.array(true_labels)
+            )
+            standard_distances = calculate_prediction_distance(
+                np.array(standard_preds), 
+                np.array(true_labels)
+            )
+            
+            history['reservoir_model']['distances'].append(reservoir_distances)
+            history['standard_model']['distances'].append(standard_distances)
+            
+            print(f"Epoch {epoch+1}:")
+            print(f"  Reservoir - Mean Distance: {reservoir_distances['mean_distance']:.4f}")
+            print(f"  Standard  - Mean Distance: {standard_distances['mean_distance']:.4f}")
+        
+        # ...existing code...
+    
+    # Save history with distance metrics
+    if config.USE_MATH_DATASET:
+        np.save('training_history_math.npy', history)
+    
+    return history
