@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 # --- Configuration Flag ---
 # Set to True for quick local testing, False for full training on GPU
-LOCAL_TESTING = True
+LOCAL_TESTING = False
 # Set to 'math' for SimpleMath dataset, 'story' for TinyStories dataset
 TASK_TYPE = 'math'  # Options: 'math' or 'story'
 
