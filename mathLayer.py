@@ -55,7 +55,7 @@ FULL_CONFIG = ModelConfig(
     LEARNING_RATE=3e-4,
     NUM_TRAIN_STEPS=50000,
     LOG_INTERVAL=50,
-    DATASET_SIZE=20000  # Larger dataset for full training
+    DATASET_SIZE=80000  # Larger dataset for full training
 )
 
 # Select config based on LOCAL_TESTING flag
@@ -80,12 +80,14 @@ DATASET_SIZE = CONFIG.DATASET_SIZE
 
 class MathematicalOperatorBlock(nn.Module):
     """
-    A non-trainable block that applies fixed mathematical operations.
-    It splits the input features, performs operations, and returns the result.
+    Previously gradients were blocked with torch.no_grad(), making this
+    addition almost inert for learning. Now gradients flow. A single
+    scalar gate lets the network learn to suppress the block.
     """
     def __init__(self):
         super().__init__()
-        # This module has no parameters, so no training will occur within it.
+        # Gate (trainable); initialized near 0 so model can opt-in gradually.
+        self.gate = nn.Parameter(torch.zeros(1))
 
     def forward(self, x):
         """
@@ -102,18 +104,19 @@ class MathematicalOperatorBlock(nn.Module):
         # --- Perform fixed mathematical operations ---
         # These operations are deterministic and have no weights.
         # Gradients will flow through them, but there's nothing here to update.
-        with torch.no_grad(): # Explicitly state no gradient calculations for weights (there are none)
-            op1_add = chunk1 + chunk2
-            op2_sub = chunk1 - chunk2
-            op3_mul = chunk1 * chunk3
+        op1_add = chunk1 + chunk2          # linear mix
+        op2_sub = chunk1 - chunk2          # contrast
+        op3_mul = chunk1 * chunk3          # quadratic interaction
+        op4_const = torch.full_like(chunk1, 0.5)  # constant bias channel
 
-            # We'll just use a constant for the fourth operation for simplicity
-            op4_const = torch.ones_like(chunk1) * 0.5
-
-        # Concatenate the results back together
         result = torch.cat([op1_add, op2_sub, op3_mul, op4_const], dim=-1)
 
-        return result
+        # Normalize to avoid blowing up residual variance after concat.
+        result = result - result.mean(dim=-1, keepdim=True)
+        result = result / (result.std(dim=-1, keepdim=True) + 1e-6)
+
+        # Apply small gate (sigmoid keeps it in [0,1])
+        return torch.sigmoid(self.gate) * result
 
 # --- 2. Core Transformer Components ---
 
