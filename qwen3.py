@@ -9,9 +9,9 @@ import math
 # --- Configuration ---
 # Based on the Qwen3 technical report, adjusted for a tiny educational model.
 vocab_size = 10000      # Size of our vocabulary
-d_model = 128           # The main dimension of the model
-n_heads = 2             # Number of attention heads
-n_layers = 2            # Number of transformer blocks
+d_model = 256           # The main dimension of the model
+n_heads = 4             # Number of attention heads
+n_layers = 4            # Number of transformer blocks
 dropout = 0.1           # Dropout rate
 n_experts = 8           # Number of experts in the MoE layer
 top_k_experts = 2       # Number of experts to route each token to
@@ -246,7 +246,7 @@ class TinyStoriesDataset(Dataset):
 print("Loading and preparing dataset...")
 dataset = load_dataset("roneneldan/TinyStories")
 train_data = dataset['train']
-small_train_data = train_data.select(range(1000)) 
+small_train_data = train_data.select(range(20000)) 
 
 train_dataset = TinyStoriesDataset(small_train_data, tokenizer, context_length, vocab_size)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
