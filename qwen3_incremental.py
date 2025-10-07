@@ -240,7 +240,7 @@ training_stages = [
     },
     {
         "name": "Stage 2: Simple Reasoning & QA",
-        "dataset_name": "facebook/babi_all_tasks_plus_plus",
+        "dataset_name": "facebook/babi_qa",
         "dataset_config": "en-10k",
         "dataset_split": "train",
         "num_samples": 10000,
