@@ -18,6 +18,18 @@ n_experts = 8           # Number of experts in the MoE layer
 top_k_experts = 2       # Number of experts to route each token to
 batch_size = 32         # How many sequences to process at once
 context_length = 128    # Maximum context length for predictions
+
+#LOCAL TESTING CONFIGURATION
+# vocab_size = 10000      # Size of our vocabulary
+# d_model = 64           # The main dimension of the model
+# n_heads = 2             # Number of attention heads
+# n_layers = 2            # Number of transformer blocks
+# dropout = 0.1           # Dropout rate
+# n_experts = 2           # Number of experts in the MoE layer
+# top_k_experts = 2       # Number of experts to route each token to
+# batch_size = 32         # How many sequences to process at once
+# context_length = 128    # Maximum context length for predictions
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(f"Using device: {device}")
 
@@ -238,7 +250,7 @@ training_stages = [
     },
     {
         "name": "Stage 2: Simple Reasoning & QA",
-        "dataset_name": "rajpurkar/squad",
+        "dataset_name": "squad",  # Using the canonical squad dataset
         "dataset_split": "train",
         "num_samples": 10000,
         "num_epochs": 3,
@@ -280,7 +292,12 @@ for i, stage in enumerate(training_stages):
     dataset_config = stage.get('dataset_config', None) # .get() handles missing keys gracefully
     
     # Load the dataset from Hugging Face
-    full_dataset = load_dataset(dataset_name, name=dataset_config, split=stage['dataset_split'])
+    # Use trust_remote_code=True to handle legacy dataset formats
+    try:
+        full_dataset = load_dataset(dataset_name, name=dataset_config, split=stage['dataset_split'], trust_remote_code=True)
+    except Exception as e:
+        print(f"Failed to load dataset with trust_remote_code=True, trying without it...")
+        full_dataset = load_dataset(dataset_name, name=dataset_config, split=stage['dataset_split'])
     
     # Select a subset of data for faster training
     # Make sure we don't request more samples than available
