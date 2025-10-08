@@ -10,11 +10,11 @@ import os
 # --- Configuration ---
 # Based on the Qwen3 technical report, adjusted for a tiny educational model.
 vocab_size = 10000      # Size of our vocabulary
-d_model = 256           # The main dimension of the model
-n_heads = 4             # Number of attention heads
-n_layers = 4            # Number of transformer blocks
+d_model = 64           # The main dimension of the model (must be divisible by n_heads)
+n_heads = 2             # Number of attention heads
+n_layers = 2            # Number of transformer blocks
 dropout = 0.1           # Dropout rate
-n_experts = 8           # Number of experts in the MoE layer
+n_experts = 2           # Number of experts in the MoE layer
 top_k_experts = 2       # Number of experts to route each token to
 batch_size = 32         # How many sequences to process at once
 context_length = 128    # Maximum context length for predictions
@@ -211,19 +211,17 @@ class CurriculumDataset(Dataset):
 def format_tinystories(example):
     return example['text']
 
-def format_babi(example):
+def format_squad(example):
     # Combine context, question, and answer into a single string
-    context = example['text']
-    # The babi dataset has a weird format, so we clean it up.
-    context_clean = ' '.join(context.split('\n')[0].split(' ')[1:])
-    question = context.split('\n')[1].split('\t')[0]
-    answer = context.split('\n')[1].split('\t')[1]
-    return f"Context: {context_clean}\nQuestion: {question}\nAnswer: {answer}"
+    context = example['context']
+    question = example['question']
+    # SQuAD answers is a dict with 'text' as a list
+    answer = example['answers']['text'][0] if example['answers']['text'] else "unknown"
+    return f"Context: {context}\nQuestion: {question}\nAnswer: {answer}"
 
 def format_logicnli(example):
-    # Map numeric labels to text for clarity
-    label_map = {0: "entailment", 1: "neutral", 2: "contradiction"}
-    label_text = label_map[example['label']]
+    # The label is already a string in this dataset, not a numeric value
+    label_text = example['label']
     return f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}\nLabel: {label_text}"
 
 # --- Training Stage Definition ---
@@ -233,28 +231,27 @@ training_stages = [
         "dataset_name": "roneneldan/TinyStories",
         "dataset_split": "train",
         "num_samples": 20000,
-        "num_epochs": 2,
+        "num_epochs": 1,
         "learning_rate": 1e-3,
         "formatting_fn": format_tinystories,
         "generation_prompt": "Once upon a time"
     },
     {
         "name": "Stage 2: Simple Reasoning & QA",
-        "dataset_name": "facebook/babi_qa",
-        "dataset_config": "en-10k-qa1",
+        "dataset_name": "rajpurkar/squad",
         "dataset_split": "train",
         "num_samples": 10000,
-        "num_epochs": 3,
+        "num_epochs": 1,
         "learning_rate": 5e-4,
-        "formatting_fn": format_babi,
-        "generation_prompt": "Context: Mary moved to the bathroom. John went to the hallway.\nQuestion: Where is Mary?\nAnswer:"
+        "formatting_fn": format_squad,
+        "generation_prompt": "Context: The Amazon rainforest is a moist broadleaf forest.\nQuestion: What kind of forest is the Amazon?\nAnswer:"
     },
     {
         "name": "Stage 3: Logical Inference",
         "dataset_name": "tasksource/LogicNLI",
         "dataset_split": "train",
         "num_samples": 15000,
-        "num_epochs": 3,
+        "num_epochs": 1,
         "learning_rate": 1e-4,
         "formatting_fn": format_logicnli,
         "generation_prompt": "Premise: If it is raining, the ground is wet.\nHypothesis: It is not raining.\nLabel:"
@@ -286,7 +283,10 @@ for i, stage in enumerate(training_stages):
     full_dataset = load_dataset(dataset_name, name=dataset_config, split=stage['dataset_split'])
     
     # Select a subset of data for faster training
-    subset_data = full_dataset.select(range(stage['num_samples']))
+    # Make sure we don't request more samples than available
+    num_samples = min(stage['num_samples'], len(full_dataset))
+    print(f"Using {num_samples} samples (requested: {stage['num_samples']}, available: {len(full_dataset)})")
+    subset_data = full_dataset.select(range(num_samples))
 
     # Create the custom PyTorch Dataset and DataLoader
     train_dataset = CurriculumDataset(subset_data, tokenizer, context_length, vocab_size, stage['formatting_fn'])
@@ -321,6 +321,8 @@ for i, stage in enumerate(training_stages):
     print(f"\n--- Generating text after {stage['name']} ---")
     prompt = stage['generation_prompt']
     start_tokens = tokenizer.encode(prompt, return_tensors='pt').to(device)
+    # Ensure tokens are within our vocabulary size
+    start_tokens = start_tokens % vocab_size
     generated_tokens = model.generate(start_tokens, max_new_tokens=50)
     generated_text = tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
     print(generated_text)
