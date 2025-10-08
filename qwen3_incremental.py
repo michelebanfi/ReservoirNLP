@@ -10,11 +10,11 @@ import os
 # --- Configuration ---
 # Based on the Qwen3 technical report, adjusted for a tiny educational model.
 vocab_size = 10000      # Size of our vocabulary
-d_model = 64           # The main dimension of the model (must be divisible by n_heads)
-n_heads = 2             # Number of attention heads
-n_layers = 2            # Number of transformer blocks
+d_model = 256           # The main dimension of the model
+n_heads = 4             # Number of attention heads
+n_layers = 4            # Number of transformer blocks
 dropout = 0.1           # Dropout rate
-n_experts = 2           # Number of experts in the MoE layer
+n_experts = 8           # Number of experts in the MoE layer
 top_k_experts = 2       # Number of experts to route each token to
 batch_size = 32         # How many sequences to process at once
 context_length = 128    # Maximum context length for predictions
@@ -231,7 +231,7 @@ training_stages = [
         "dataset_name": "roneneldan/TinyStories",
         "dataset_split": "train",
         "num_samples": 20000,
-        "num_epochs": 1,
+        "num_epochs": 2,
         "learning_rate": 1e-3,
         "formatting_fn": format_tinystories,
         "generation_prompt": "Once upon a time"
@@ -241,7 +241,7 @@ training_stages = [
         "dataset_name": "rajpurkar/squad",
         "dataset_split": "train",
         "num_samples": 10000,
-        "num_epochs": 1,
+        "num_epochs": 3,
         "learning_rate": 5e-4,
         "formatting_fn": format_squad,
         "generation_prompt": "Context: The Amazon rainforest is a moist broadleaf forest.\nQuestion: What kind of forest is the Amazon?\nAnswer:"
@@ -251,7 +251,7 @@ training_stages = [
         "dataset_name": "tasksource/LogicNLI",
         "dataset_split": "train",
         "num_samples": 15000,
-        "num_epochs": 1,
+        "num_epochs": 3,
         "learning_rate": 1e-4,
         "formatting_fn": format_logicnli,
         "generation_prompt": "Premise: If it is raining, the ground is wet.\nHypothesis: It is not raining.\nLabel:"
