@@ -21,8 +21,8 @@ HALT_EXPLORATION = 0.2 # Probability to force exploring more steps during traini
 print(f"Running ACT-HRM-Sandwich on {DEVICE}...")
 
 # --- 1. DATASET (Same as before) ---
-class ArithmeticReasoningDataset(Dataset):
-    def __init__(self, tokenizer, size=1000):
+class ComplexArithmeticDataset(Dataset):
+    def __init__(self, tokenizer, size=5000):
         self.tokenizer = tokenizer
         self.size = size
 
@@ -30,14 +30,34 @@ class ArithmeticReasoningDataset(Dataset):
         return self.size
 
     def __getitem__(self, idx):
-        start = random.randint(1, 50)
-        step = random.randint(1, 10)
-        length = 4
-        sequence = [start + i*step for i in range(length)]
+        # 33% Linear (Easy), 33% Geometric (Medium), 33% Fibonacci (Hard)
+        task_type = random.choice(['linear', 'geometric', 'fibonacci'])
         
-        input_text = "predict next: " + " , ".join(map(str, sequence[:-1]))
-        target_text = str(sequence[-1])
+        if task_type == 'linear':
+            # Sequence: x, x+d, x+2d ...
+            start = random.randint(1, 50)
+            step = random.randint(1, 10)
+            seq = [start + i*step for i in range(4)]
+            
+        elif task_type == 'geometric':
+            # Sequence: x, x*r, x*r^2 ...
+            start = random.randint(1, 5)
+            ratio = random.randint(2, 3) # Keep numbers small to fit T5 vocab
+            seq = [start * (ratio ** i) for i in range(4)]
+            
+        elif task_type == 'fibonacci':
+            # Sequence: a, b, a+b, a+2b+a ...
+            a = random.randint(1, 10)
+            b = random.randint(1, 10)
+            seq = [a, b]
+            for _ in range(2):
+                seq.append(seq[-1] + seq[-2])
+        
+        # Format Input
+        input_text = "predict next: " + " , ".join(map(str, seq[:-1]))
+        target_text = str(seq[-1])
 
+        # Tokenize
         source = self.tokenizer(input_text, max_length=SEQ_LEN, padding="max_length", truncation=True, return_tensors="pt")
         target = self.tokenizer(target_text, max_length=10, padding="max_length", truncation=True, return_tensors="pt")
 
@@ -242,7 +262,7 @@ class NeuroSymbolicACT(nn.Module):
 # --- 4. TRAINING WITH Q-LOSS ---
 def train():
     model = NeuroSymbolicACT(MODEL_NAME).to(DEVICE)
-    dataset = ArithmeticReasoningDataset(model.tokenizer, size=2000) # Increased size
+    dataset = ComplexArithmeticDataset(model.tokenizer, size=5000)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate Learning Rates: Q-Head needs to learn FASTER than the Core to catch up
@@ -322,6 +342,19 @@ def train():
                      next_value = best_future
             
             avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(DEVICE)
+            
+            # z_drift_loss = 0
+            # for res in step_results:
+            #     # res['z_final'] is (Input + OutputAdapter(z))
+            #     # We punish the MAGNITUDE of OutputAdapter(z)
+            #     z_drift = res['z_final'] - original_inputs # This is just z_out
+            #     z_drift_loss += z_drift.norm(p=2) 
+
+            # avg_drift_loss = z_drift_loss / (len(step_results) * BATCH_SIZE)
+
+            # # Total Loss
+            # # LM + Q + tiny Drift penalty
+            # loss = lm_loss + (1.0 * avg_q_loss) + (0.01 * avg_drift_loss)
             
             # Total Loss
             loss = lm_loss + (1.0 * avg_q_loss) # Boost Q-Loss weight
