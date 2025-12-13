@@ -242,17 +242,22 @@ class NeuroSymbolicACT(nn.Module):
 # --- 4. TRAINING WITH Q-LOSS ---
 def train():
     model = NeuroSymbolicACT(MODEL_NAME).to(DEVICE)
-    dataset = ArithmeticReasoningDataset(model.tokenizer)
+    dataset = ArithmeticReasoningDataset(model.tokenizer, size=2000) # Increased size
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-    optimizer = torch.optim.AdamW(model.hrm.parameters(), lr=LEARNING_RATE)
+    
+    # Separate Learning Rates: Q-Head needs to learn FASTER than the Core to catch up
+    optimizer = torch.optim.AdamW([
+        {'params': model.hrm.q_head.parameters(), 'lr': 5e-4}, # Boosted Q-LR
+        {'params': [p for n, p in model.hrm.named_parameters() if 'q_head' not in n], 'lr': 1e-4}
+    ])
 
     model.train()
-    
-    print("\nTraining ACT-HRM...")
+    print("\nTraining ACT-HRM with Q-Learning Bootstrapping...")
     
     for epoch in range(EPOCHS):
         total_lm_loss = 0
         total_q_loss = 0
+        total_halt_correct = 0 # Track how often it halts correctly
         
         for batch in dataloader:
             optimizer.zero_grad()
@@ -261,45 +266,67 @@ def train():
             mask = batch["attention_mask"].to(DEVICE)
             labels = batch["labels"].to(DEVICE)
             
-            # Forward (Runs MAX_ACT_STEPS and collects all data)
+            # Forward Pass
             step_results = model(input_ids, mask, labels=labels)
             
-            # --- CALCULATE LOSSES ---
+            # --- Q-LEARNING LOSS CALCULATION ---
             batch_loss = 0
             
-            # 1. LM Loss (Reasoning)
-            # We want to minimize loss on the *last* step (or weighted average)
-            # Standard ACT uses weighted average. Here we use "Last Step + Random Exploration Step"
-            # to keep it simple and robust.
+            # 1. LM Loss (Only from the FINAL step to save memory/compute)
             final_step = step_results[-1]
             lm_loss = final_step["lm_loss"]
             
-            # 2. Q-Loss (Halting)
-            # We train the Q-Head to predict "is_correct"
-            # Target for Q-Head: 1 if correct, 0 if wrong
+            # 2. Temporal Difference (TD) Learning for Q-Values
             q_losses = []
-            for res in step_results:
-                q_logits = res["q_logits"] # [B, 2] -> [Halt, Cont]
-                is_correct = res["is_correct"] # [B] (1.0 or 0.0)
-                
-                # If Correct: Target is Halt=1 (logit 0 > logit 1)
-                # If Wrong:   Target is Halt=0 (logit 1 > logit 0)
-                # We can treat this as Binary Cross Entropy on the Halt Probability
-                
-                halt_prob = F.softmax(q_logits, dim=-1)[:, 0] # Probability of halting
-                
-                # We want Halt Prob to match Correctness
-                q_loss = F.binary_cross_entropy(halt_prob, is_correct)
-                q_losses.append(q_loss)
             
-            avg_q_loss = torch.stack(q_losses).mean()
+            # We iterate BACKWARDS: The reward propagates from the end to the start
+            # Target for the LAST step is just the correctness (1.0 or 0.0)
+            next_value = step_results[-1]["is_correct"] 
+            
+            for i in reversed(range(len(step_results) - 1)):
+                curr_res = step_results[i]
+                
+                # Current predictions
+                halt_logit = curr_res["q_logits"][:, 0]
+                cont_logit = curr_res["q_logits"][:, 1]
+                
+                # Target Construction:
+                # If I Halt now, the value is "is_correct" (Immediate Reward)
+                # If I Continue, the value is "next_value" (Future Reward)
+                # We want the model to predict the MAX of these two options
+                
+                # Calculate Target Q-Value (Bellman Equation)
+                # target = max(is_correct, next_value)
+                # Note: We use Sigmoid/BCE logic here for stability
+                target_q = torch.maximum(curr_res["is_correct"], next_value).detach()
+                
+                # If Target is 1.0 (Success is possible):
+                # We want max(halt_logit, cont_logit) to be high.
+                # Specifically, if is_correct=1, Halt Logit should be high.
+                # If is_correct=0 but next_value=1, Cont Logit should be high.
+                
+                # Simplification for Stability:
+                # 1. Train Halt Logit against Current Correctness
+                halt_loss = F.binary_cross_entropy_with_logits(halt_logit, curr_res["is_correct"])
+                
+                # 2. Train Continue Logit against Future Value (Bootstrapping)
+                cont_loss = F.binary_cross_entropy_with_logits(cont_logit, next_value)
+                
+                q_losses.append(halt_loss + cont_loss)
+                
+                # Update next_value for the previous step
+                # The value of being at step `i` is the best of (Halting, Continuing)
+                # We use the Model's OWN prediction for bootstrapping (Self-Consistency)
+                with torch.no_grad():
+                     best_future = torch.maximum(torch.sigmoid(halt_logit), torch.sigmoid(cont_logit))
+                     next_value = best_future
+            
+            avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(DEVICE)
             
             # Total Loss
-            loss = lm_loss + avg_q_loss
+            loss = lm_loss + (1.0 * avg_q_loss) # Boost Q-Loss weight
             
             loss.backward()
-            
-            # Clip Gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
