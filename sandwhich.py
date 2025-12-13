@@ -9,7 +9,7 @@ import math
 # --- CONFIGURATION ---
 MODEL_NAME = "t5-small"
 BATCH_SIZE = 32
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1e-4
 EPOCHS = 10
 SEQ_LEN = 32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -109,70 +109,64 @@ class HierarchicalReasoningCore(nn.Module):
         self.h_cycles = h_cycles
         self.l_cycles = l_cycles
 
-        # --- 1. THE ADAPTERS (New) ---
-        # Projects T5 Semantic Space -> HRM Logic Space
+        # ADAPTERS
         self.input_adapter = nn.Sequential(
             nn.Linear(dim, dim),
             nn.LayerNorm(dim),
             nn.GELU()
         )
-        
-        # Projects HRM Logic Space -> T5 Semantic Space
         self.output_adapter = nn.Linear(dim, dim)
 
-        # --- 2. THE REASONING BLOCKS (Same as before) ---
+        # REASONING BLOCKS
         self.H_Block = HRMBlock(dim, num_heads)
         self.L_Block = HRMBlock(dim, num_heads)
 
-        # Learnable Initial States
+        # CONTROL RODS (New Normalization Layers)
+        self.norm_fusion_L = nn.LayerNorm(dim) # Stabilizes (z_L + context)
+        self.norm_fusion_H = nn.LayerNorm(dim) # Stabilizes (z_H + z_L)
+
+        # Init States
         self.H_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.L_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.pos_embed = nn.Parameter(torch.randn(1, SEQ_LEN, dim) * 0.02)
 
-        # --- 3. ZERO-INIT TRICK (Crucial) ---
-        # Initialize output adapter to zero. 
-        # Initially, the model outputs 0 + Residual = Input.
-        # This prevents "Shock" and garbage outputs like "Versailles".
+        # Zero-Init Output
         nn.init.zeros_(self.output_adapter.weight)
         nn.init.zeros_(self.output_adapter.bias)
 
     def forward(self, input_embeddings):
         B, S, D = input_embeddings.shape
         
-        # A. Adapt Input
-        # Save original for residual skip at the very end
+        # 1. Adapt & Residual Base
         original_inputs = input_embeddings 
-        
-        # Map to Reasoning Space
         x = self.input_adapter(input_embeddings)
         
-        # B. Initialize Thinking States
+        # 2. Init States
         z_H = self.H_init.expand(B, S, D)
         z_L = self.L_init.expand(B, S, D)
-        
-        # Add internal position info
         x = x + self.pos_embed[:, :S, :]
 
-        # C. The Hierarchical Loop
+        # 3. The Stabilized Loop
         for h_step in range(self.h_cycles):
             for l_step in range(self.l_cycles):
-                # Input Injection (Reasoning Space)
+                # Input Injection with Stabilization
+                # instead of just adding, we normalize the mix
                 context = z_H + x 
-                z_L = self.L_Block(z_L + context)
+                z_L_input = self.norm_fusion_L(z_L + context) 
+                
+                # Update Fast Stream
+                z_L = self.L_Block(z_L_input)
 
-            # Slow Stream Update
-            z_H = self.H_Block(z_H + z_L)
+            # Slow Stream Update with Stabilization
+            z_H_input = self.norm_fusion_H(z_H + z_L)
+            z_H = self.H_Block(z_H_input)
 
-        # D. Adapt Output + Global Residual
-        # Project back to T5 Space
+        # 4. Output with Skip
         z_out = self.output_adapter(z_H)
         
-        # E. SKIP CONNECTION
-        # Output = Original T5 Embeddings + Calculated Delta
-        # Because output_adapter is 0-init, this starts as Identity.
-        final_output = original_inputs + z_out
-        
-        return final_output
+        # Scale the learned delta down initially to prevent shock
+        # (The model has to learn to increase this scaling factor)
+        return original_inputs + z_out
 
 # --- 3. THE SANDWICH WRAPPER ---
 class NeuroSymbolicSandwich(nn.Module):
@@ -257,9 +251,10 @@ def train():
             anchor_loss = mse_loss_fn(z_reasoned, z_input) 
             
             # Combined Loss
-            loss = lm_loss + (0.1 * anchor_loss)
+            loss = lm_loss + (0.01 * anchor_loss)
             
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
             total_loss += lm_loss.item()
