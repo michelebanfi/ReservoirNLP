@@ -103,64 +103,76 @@ class HRMBlock(nn.Module):
         return x
 
 class HierarchicalReasoningCore(nn.Module):
-    """
-    The Recurrent Brain.
-    Inputs: T5 Encoder Embeddings (Batch, Seq, Dim)
-    Outputs: "Reasoned" Embeddings (Batch, Seq, Dim)
-    """
     def __init__(self, dim, num_heads, h_cycles, l_cycles):
         super().__init__()
         self.dim = dim
         self.h_cycles = h_cycles
         self.l_cycles = l_cycles
 
-        # The two "streams" of thought
-        self.H_Block = HRMBlock(dim, num_heads) # Slow / Abstract
-        self.L_Block = HRMBlock(dim, num_heads) # Fast / Concrete
+        # --- 1. THE ADAPTERS (New) ---
+        # Projects T5 Semantic Space -> HRM Logic Space
+        self.input_adapter = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.GELU()
+        )
+        
+        # Projects HRM Logic Space -> T5 Semantic Space
+        self.output_adapter = nn.Linear(dim, dim)
 
-        # Learnable Initial States (Thinking from a blank slate)
+        # --- 2. THE REASONING BLOCKS (Same as before) ---
+        self.H_Block = HRMBlock(dim, num_heads)
+        self.L_Block = HRMBlock(dim, num_heads)
+
+        # Learnable Initial States
         self.H_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.L_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
-        
-        # Simple learned position encoding for the "thinking steps"
         self.pos_embed = nn.Parameter(torch.randn(1, SEQ_LEN, dim) * 0.02)
+
+        # --- 3. ZERO-INIT TRICK (Crucial) ---
+        # Initialize output adapter to zero. 
+        # Initially, the model outputs 0 + Residual = Input.
+        # This prevents "Shock" and garbage outputs like "Versailles".
+        nn.init.zeros_(self.output_adapter.weight)
+        nn.init.zeros_(self.output_adapter.bias)
 
     def forward(self, input_embeddings):
         B, S, D = input_embeddings.shape
         
-        # 1. Initialize Thinking States
-        # Expand init states to batch size and sequence length
+        # A. Adapt Input
+        # Save original for residual skip at the very end
+        original_inputs = input_embeddings 
+        
+        # Map to Reasoning Space
+        x = self.input_adapter(input_embeddings)
+        
+        # B. Initialize Thinking States
         z_H = self.H_init.expand(B, S, D)
         z_L = self.L_init.expand(B, S, D)
         
-        # Add position info so the model knows "where" in the sequence it is thinking
-        # (Since T5 encoder out already has pos info, we mix it in)
-        input_embeddings = input_embeddings + self.pos_embed[:, :S, :]
+        # Add internal position info
+        x = x + self.pos_embed[:, :S, :]
 
-        # 2. The Hierarchical Loop (The "Brain")
-        # Logic from models/hrm/hrm_act_v1.py
-        
+        # C. The Hierarchical Loop
         for h_step in range(self.h_cycles):
             for l_step in range(self.l_cycles):
-                # FAST STREAM UPDATE (Low-level)
-                # It sees the Input AND the Slow Stream's current state
-                # z_L = L_Layer(z_L, z_H + input)
-                
-                # Injection: The Low level sees the "Goal" (z_H) and the "Reality" (input)
-                context = z_H + input_embeddings
-                
-                # We add context to z_L before processing (Input Injection)
-                z_L_input = z_L + context 
-                z_L = self.L_Block(z_L_input)
+                # Input Injection (Reasoning Space)
+                context = z_H + x 
+                z_L = self.L_Block(z_L + context)
 
-            # SLOW STREAM UPDATE (High-level)
-            # It only sees the Fast Stream's summary
-            # z_H = H_Layer(z_H, z_L)
+            # Slow Stream Update
             z_H = self.H_Block(z_H + z_L)
 
-        # 3. Final Output
-        # The T5 Decoder will attend to this "High Level Thought"
-        return z_H
+        # D. Adapt Output + Global Residual
+        # Project back to T5 Space
+        z_out = self.output_adapter(z_H)
+        
+        # E. SKIP CONNECTION
+        # Output = Original T5 Embeddings + Calculated Delta
+        # Because output_adapter is 0-init, this starts as Identity.
+        final_output = original_inputs + z_out
+        
+        return final_output
 
 # --- 3. THE SANDWICH WRAPPER ---
 class NeuroSymbolicSandwich(nn.Module):
