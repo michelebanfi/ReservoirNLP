@@ -12,7 +12,7 @@ MODEL_NAME = "t5-small"
 BATCH_SIZE = 16 # Reduced batch size as we run decoder multiple times
 LEARNING_RATE = 1e-4
 EPOCHS = 10
-SEQ_LEN = 32
+SEQ_LEN = 128
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ACT Configuration
