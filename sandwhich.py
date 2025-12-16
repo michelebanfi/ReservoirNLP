@@ -361,6 +361,7 @@ def train():
         print(f"  {q} -> {model.generate(q)}")
 
         q = "predict next: 1, 1, 2, 3"
+        print(f"  {q} -> {model.generate(q)}")
 
 if __name__ == "__main__":
     train()
