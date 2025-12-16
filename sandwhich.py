@@ -15,10 +15,95 @@ SEQ_LEN = 32
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ACT Configuration
-MAX_ACT_STEPS = 8      # Maximum thinking time
+MAX_ACT_STEPS = 12      # Maximum thinking time
 HALT_EXPLORATION = 0.2 # Probability to force exploring more steps during training
 
 print(f"Running ACT-HRM-Sandwich on {DEVICE}...")
+
+class SudokuDataset(Dataset):
+    """
+    Generates 4x4 Sudoku puzzles on the fly.
+    Input:  "solve sudoku: 1 0 4 3 | 0 0 2 1 | ..." (0 is empty)
+    Target: "1 2 4 3 | 3 4 2 1 | ..."
+    """
+    def __init__(self, tokenizer, size=5000):
+        self.tokenizer = tokenizer
+        self.size = size
+        
+        # A single valid 4x4 seed board
+        self.base_board = np.array([
+            [1, 2, 3, 4],
+            [3, 4, 1, 2],
+            [2, 1, 4, 3],
+            [4, 3, 2, 1]
+        ])
+
+    def __len__(self):
+        return self.size
+
+    def generate_puzzle(self):
+        # 1. Start with valid board
+        board = self.base_board.copy()
+        
+        # 2. Shuffle Digits (Relabel 1->4, 2->1, etc.)
+        # Logic adapted from your uploaded build_sudoku_dataset.py
+        mapping = np.random.permutation(np.arange(1, 5))
+        # Create a lookup table where index 0 is 0 (empty), and index 1..4 map to the shuffled values
+        mapper = np.zeros(5, dtype=int)
+        mapper[1:] = mapping
+        board = mapper[board]
+        
+        # 3. Shuffle Rows/Cols within Bands (2x2 blocks)
+        # 4x4 has 2 bands of 2 rows each
+        if random.random() < 0.5:
+            # Swap row 0 and 1
+            board[[0, 1]] = board[[1, 0]]
+        if random.random() < 0.5:
+            # Swap row 2 and 3
+            board[[2, 3]] = board[[3, 2]]
+            
+        # Swap the two large bands (rows 0-1 vs rows 2-3)
+        if random.random() < 0.5:
+            board[[0, 1, 2, 3]] = board[[2, 3, 0, 1]]
+            
+        # Same for columns
+        board = board.T
+        if random.random() < 0.5: board[[0, 1]] = board[[1, 0]]
+        if random.random() < 0.5: board[[2, 3]] = board[[3, 2]]
+        if random.random() < 0.5: board[[0, 1, 2, 3]] = board[[2, 3, 0, 1]]
+        board = board.T
+        
+        # 4. Create Mask (The Puzzle)
+        # Remove K random cells to make it a puzzle
+        solution = board.copy()
+        mask_count = random.randint(4, 8) # Remove 4 to 8 numbers
+        mask_indices = np.random.choice(16, mask_count, replace=False)
+        flat_board = board.flatten()
+        flat_board[mask_indices] = 0 # 0 represents empty
+        puzzle = flat_board.reshape(4, 4)
+        
+        return puzzle, solution
+
+    def __getitem__(self, idx):
+        puzzle, solution = self.generate_puzzle()
+        
+        # Format for T5: "1 0 4 3 | 0 2 ..."
+        # We use | to separate rows to help the model understand the grid structure
+        def to_str(grid):
+            rows = [" ".join(map(str, row)) for row in grid]
+            return " | ".join(rows)
+            
+        input_text = "solve sudoku: " + to_str(puzzle)
+        target_text = to_str(solution)
+
+        source = self.tokenizer(input_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
+        target = self.tokenizer(target_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
+
+        return {
+            "input_ids": source.input_ids.squeeze(),
+            "attention_mask": source.attention_mask.squeeze(),
+            "labels": target.input_ids.squeeze()
+        }
 
 # --- 1. DATASET (Same as before) ---
 class ComplexArithmeticDataset(Dataset):
@@ -262,7 +347,7 @@ class NeuroSymbolicACT(nn.Module):
 # --- 4. TRAINING WITH Q-LOSS ---
 def train():
     model = NeuroSymbolicACT(MODEL_NAME).to(DEVICE)
-    dataset = ComplexArithmeticDataset(model.tokenizer, size=5000)
+    dataset = SudokuDataset(model.tokenizer, size=5000)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate Learning Rates: Q-Head needs to learn FASTER than the Core to catch up
