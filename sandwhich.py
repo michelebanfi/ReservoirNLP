@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 import random
 import math
+import numpy as np
 
 # --- CONFIGURATION ---
 MODEL_NAME = "t5-small"
