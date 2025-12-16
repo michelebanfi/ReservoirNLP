@@ -306,40 +306,28 @@ def train():
             for i in reversed(range(len(step_results) - 1)):
                 curr_res = step_results[i]
                 
-                # Current predictions
                 halt_logit = curr_res["q_logits"][:, 0]
                 cont_logit = curr_res["q_logits"][:, 1]
                 
-                # Target Construction:
-                # If I Halt now, the value is "is_correct" (Immediate Reward)
-                # If I Continue, the value is "next_value" (Future Reward)
-                # We want the model to predict the MAX of these two options
+                # --- THE FIX: Discount Factor (Gamma) ---
+                GAMMA = 0.9  # Time Pressure! 
+                discounted_future = next_value * GAMMA 
                 
-                # Calculate Target Q-Value (Bellman Equation)
-                # target = max(is_correct, next_value)
-                # Note: We use Sigmoid/BCE logic here for stability
-                target_q = torch.maximum(curr_res["is_correct"], next_value).detach()
+                # Target: Max of (Immediate Correctness, Discounted Future)
+                target_q = torch.maximum(curr_res["is_correct"], discounted_future).detach()
                 
-                # If Target is 1.0 (Success is possible):
-                # We want max(halt_logit, cont_logit) to be high.
-                # Specifically, if is_correct=1, Halt Logit should be high.
-                # If is_correct=0 but next_value=1, Cont Logit should be high.
-                
-                # Simplification for Stability:
-                # 1. Train Halt Logit against Current Correctness
+                # 1. Train Halt to match accuracy (Did I get it right?)
                 halt_loss = F.binary_cross_entropy_with_logits(halt_logit, curr_res["is_correct"])
                 
-                # 2. Train Continue Logit against Future Value (Bootstrapping)
-                cont_loss = F.binary_cross_entropy_with_logits(cont_logit, next_value)
+                # 2. Train Continue to match Future Potential (Is there a reward waiting?)
+                cont_loss = F.binary_cross_entropy_with_logits(cont_logit, discounted_future)
                 
                 q_losses.append(halt_loss + cont_loss)
                 
                 # Update next_value for the previous step
-                # The value of being at step `i` is the best of (Halting, Continuing)
-                # We use the Model's OWN prediction for bootstrapping (Self-Consistency)
                 with torch.no_grad():
                      best_future = torch.maximum(torch.sigmoid(halt_logit), torch.sigmoid(cont_logit))
-                     next_value = best_future
+                     next_value = best_future # The loop applies Gamma in the NEXT iteration
             
             avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(DEVICE)
             
@@ -371,6 +359,8 @@ def train():
         # Test
         q = "predict next: 10 , 20 , 30"
         print(f"  {q} -> {model.generate(q)}")
+
+        q = "predict next: 1, 1, 2, 3"
 
 if __name__ == "__main__":
     train()
