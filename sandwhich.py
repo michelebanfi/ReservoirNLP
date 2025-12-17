@@ -16,10 +16,69 @@ SEQ_LEN = 128
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ACT Configuration
-MAX_ACT_STEPS = 12      # Maximum thinking time
+MAX_ACT_STEPS = 8      # Maximum thinking time
 HALT_EXPLORATION = 0.2 # Probability to force exploring more steps during training
 
 print(f"Running ACT-HRM-Sandwich on {DEVICE}...")
+
+class TextLogicDataset(Dataset):
+    """
+    Generates bAbI-style object tracking stories.
+    Focus: Temporal Reasoning & State Updates.
+    """
+    def __init__(self, tokenizer, size=5000):
+        self.tokenizer = tokenizer
+        self.size = size
+        
+        self.people = ["Mary", "John", "Daniel", "Sandra", "Bill", "Lisa"]
+        self.locations = ["kitchen", "hallway", "garden", "office", "bedroom", "bathroom"]
+        self.actions = ["moved to", "went to", "journeyed to", "travelled to"]
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        # 1. Initialize State
+        story_len = random.randint(2, 6) # How many moves?
+        # Track where everyone is. Initially unknown.
+        current_locs = {} 
+        story_lines = []
+        
+        # 2. Generate Story
+        active_people = random.sample(self.people, 3) # Pick 3 actors
+        
+        for _ in range(story_len):
+            person = random.choice(active_people)
+            loc = random.choice(self.locations)
+            action = random.choice(self.actions)
+            
+            # Record the logic
+            current_locs[person] = loc
+            
+            # Generate Text
+            line = f"{person} {action} the {loc}."
+            story_lines.append(line)
+            
+        # 3. Generate Question
+        # Pick a person who actually moved
+        target_person = random.choice(list(current_locs.keys()))
+        target_loc = current_locs[target_person]
+        
+        question = f"Question: Where is {target_person}?"
+        
+        # Format Input: "Story: ... Question: ..."
+        input_text = "track state: " + " ".join(story_lines) + " " + question
+        target_text = target_loc
+
+        # 4. Tokenize
+        source = self.tokenizer(input_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
+        target = self.tokenizer(target_text, max_length=10, padding="max_length", truncation=True, return_tensors="pt")
+
+        return {
+            "input_ids": source.input_ids.squeeze(),
+            "attention_mask": source.attention_mask.squeeze(),
+            "labels": target.input_ids.squeeze()
+        }
 
 class SudokuDataset(Dataset):
     """
@@ -357,7 +416,7 @@ class NeuroSymbolicACT(nn.Module):
 def train():
     # 1. SETUP
     model = NeuroSymbolicACT(MODEL_NAME).to(DEVICE)
-    dataset = SudokuDataset(model.tokenizer, size=5000) # Training on SUDOKU
+    dataset = TextLogicDataset(model.tokenizer, size=5000)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate LRs for Stability
@@ -367,7 +426,7 @@ def train():
     ])
 
     model.train()
-    print("\nTraining Sudoku-ACT (with Mask Fix & Warmup)...")
+    print("\nTraining TextReasoning-ACT (with Mask Fix & Warmup)...")
     
     # 2. DEFINE A VALID TEST PUZZLE
     # A simple 4x4 puzzle with one missing number (top-left should be 1)
@@ -447,11 +506,12 @@ def train():
         print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f}")
         
         # 4. RELEVANT TEST
-        # We now test on a SUDOKU string
-        print(f"  Test: {model.generate(test_puzzle)}")
+        # We now test on a Placement string
+        test_text = "track state: Mary went to the hallway. Mary moved to the office. Question: Where is Mary?"
+        hard_text = "track state: John went to the garden. Mary moved to the kitchen. John moved to the office. Question: Where is John?"
 
-        hard_puzzle = "solve sudoku: 0 0 3 4 | 0 4 1 2 | 2 1 0 3 | 4 3 2 1"
-        print(f"HARD TEST: {model.generate(hard_puzzle)}")
+        print(f"  Test: {model.generate(test_text)}")
+        print(f"  Hard: {model.generate(hard_text)}")
 
         
 
