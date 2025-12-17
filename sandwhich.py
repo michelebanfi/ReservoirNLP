@@ -459,7 +459,7 @@ class NanoACT(nn.Module):
                 # 5. Calculate Loss for this step
                 # Flatten for CrossEntropy: [B*T, Vocab] vs [B*T]
                 loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-                lm_loss = loss_fct(logits.view(-1, vocab_size), labels.view(-1))
+                lm_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
                 
                 # 6. Reward Calculation (for Q-Learning)
                 preds = logits.argmax(dim=-1)
