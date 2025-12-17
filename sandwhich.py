@@ -771,6 +771,55 @@ def train():
         print(f"  SUDOKU: {model.generate(test_sudoku)}")
         model.train()
         print("-" * 50)
+        
+        def debug_inference(model, text, force_steps=8):
+            model.eval()
+            inputs = model.tokenizer(text, return_tensors="pt").to(DEVICE)
+            input_ids = inputs.input_ids
+            
+            with torch.no_grad():
+                # Encode
+                src_emb = model.dropout(model.pos_encoder(model.embedding(input_ids)))
+                src_padding_mask = (input_ids == model.pad_token_id)
+                memory = model.encoder(src_emb, src_key_padding_mask=src_padding_mask)
+                
+                # ACT Loop (Force Steps)
+                B, L, D = memory.shape
+                x_in = model.hrm.input_adapter(memory)
+                z = model.hrm.state_init.expand(B, L, D)
+                x_in = x_in + model.hrm.pos_embed[:, :L, :]
+                
+                # FORCE THE THINKING
+                for step in range(force_steps):
+                    z = model.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long())
+                    
+                # Decode
+                z_out = model.hrm.output_adapter(z)
+                enhanced_memory = memory + z_out
+                
+                # Greedy Decode
+                curr_tokens = torch.tensor([[0]], device=DEVICE) 
+                for _ in range(64):
+                    tgt_emb = model.dropout(model.pos_encoder(model.embedding(curr_tokens)))
+                    tgt_causal_mask = torch.triu(torch.ones(curr_tokens.size(1), curr_tokens.size(1), device=DEVICE) * float('-inf'), diagonal=1)
+                    
+                    dec_out = model.decoder(
+                        tgt=tgt_emb, 
+                        memory=enhanced_memory,
+                        tgt_mask=tgt_causal_mask, 
+                        memory_key_padding_mask=src_padding_mask
+                    )
+                    logits = model.lm_head(dec_out[:, -1, :])
+                    next_token = logits.argmax(dim=-1).unsqueeze(0)
+                    if next_token.item() == 1: break
+                    curr_tokens = torch.cat([curr_tokens, next_token], dim=1)
+                    
+            return model.tokenizer.decode(curr_tokens[0], skip_special_tokens=True)
+
+        # Test the hypothesis
+        bad_sudoku = "solve sudoku: 2 0 4 3 | 0 0 2 1 | 0 1 0 0 | 4 3 0 0" 
+        print("1 Step (Lazy):", debug_inference(model, bad_sudoku, force_steps=1))
+        print("8 Steps (Forced):", debug_inference(model, bad_sudoku, force_steps=8))
 
         
 
