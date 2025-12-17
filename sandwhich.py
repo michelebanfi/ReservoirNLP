@@ -347,91 +347,87 @@ class NeuroSymbolicACT(nn.Module):
 
 # --- 4. TRAINING WITH Q-LOSS ---
 def train():
+    # 1. SETUP
     model = NeuroSymbolicACT(MODEL_NAME).to(DEVICE)
-    dataset = SudokuDataset(model.tokenizer, size=5000)
+    dataset = SudokuDataset(model.tokenizer, size=5000) # Training on SUDOKU
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
-    # Separate Learning Rates: Q-Head needs to learn FASTER than the Core to catch up
+    # Separate LRs for Stability
     optimizer = torch.optim.AdamW([
-        {'params': model.hrm.q_head.parameters(), 'lr': 5e-4}, # Boosted Q-LR
+        {'params': model.hrm.q_head.parameters(), 'lr': 5e-4},
         {'params': [p for n, p in model.hrm.named_parameters() if 'q_head' not in n], 'lr': 1e-4}
     ])
 
     model.train()
-    print("\nTraining ACT-HRM with Q-Learning Bootstrapping...")
+    print("\nTraining Sudoku-ACT (with Mask Fix & Warmup)...")
+    
+    # 2. DEFINE A VALID TEST PUZZLE
+    # A simple 4x4 puzzle with one missing number (top-left should be 1)
+    # Row 1: . 2 3 4 | Row 2: 3 4 1 2 | Row 3: 2 1 4 3 | Row 4: 4 3 2 1
+    test_puzzle = "solve sudoku: 0 2 3 4 | 3 4 1 2 | 2 1 4 3 | 4 3 2 1"
     
     for epoch in range(EPOCHS):
+        # 3. WARMUP LOGIC
+        # First 5 epochs: Force 6 steps of thinking, Ignore Q-Loss.
+        # This helps the HRM learn "how to think" before "when to stop".
+        is_warmup = epoch < 5
+        q_loss_weight = 0.0 if is_warmup else 1.0
+        
         total_lm_loss = 0
         total_q_loss = 0
-        total_halt_correct = 0 # Track how often it halts correctly
         
         for batch in dataloader:
             optimizer.zero_grad()
             
             input_ids = batch["input_ids"].to(DEVICE)
-            mask = batch["attention_mask"].to(DEVICE)
+            mask = batch["attention_mask"].to(DEVICE) # T5 Mask (1=Valid, 0=Pad)
             labels = batch["labels"].to(DEVICE)
             
-            # Forward Pass
+            # Forward Pass (PASS THE MASK!)
+            # Ensure your model.forward() accepts and uses the mask as discussed!
             step_results = model(input_ids, mask, labels=labels)
             
-            # --- Q-LEARNING LOSS CALCULATION ---
-            batch_loss = 0
+            # --- LOSS CALCULATION ---
             
-            # 1. LM Loss (Only from the FINAL step to save memory/compute)
+            # A. Reasoning Loss (Language Model)
             final_step = step_results[-1]
             lm_loss = final_step["lm_loss"]
             
-            # 2. Temporal Difference (TD) Learning for Q-Values
+            # B. Q-Learning Loss (Halting)
             q_losses = []
-            
-            # We iterate BACKWARDS: The reward propagates from the end to the start
-            # Target for the LAST step is just the correctness (1.0 or 0.0)
-            next_value = step_results[-1]["is_correct"] 
-            
-            for i in reversed(range(len(step_results) - 1)):
-                curr_res = step_results[i]
+            if not is_warmup:
+                # Standard Q-Learning with Gamma
+                next_value = step_results[-1]["is_correct"]
+                GAMMA = 0.9
                 
-                halt_logit = curr_res["q_logits"][:, 0]
-                cont_logit = curr_res["q_logits"][:, 1]
-                
-                # --- THE FIX: Discount Factor (Gamma) ---
-                GAMMA = 0.9  # Time Pressure! 
-                discounted_future = next_value * GAMMA 
-                
-                # Target: Max of (Immediate Correctness, Discounted Future)
-                target_q = torch.maximum(curr_res["is_correct"], discounted_future).detach()
-                
-                # 1. Train Halt to match accuracy (Did I get it right?)
-                halt_loss = F.binary_cross_entropy_with_logits(halt_logit, curr_res["is_correct"])
-                
-                # 2. Train Continue to match Future Potential (Is there a reward waiting?)
-                cont_loss = F.binary_cross_entropy_with_logits(cont_logit, discounted_future)
-                
-                q_losses.append(halt_loss + cont_loss)
-                
-                # Update next_value for the previous step
-                with torch.no_grad():
-                     best_future = torch.maximum(torch.sigmoid(halt_logit), torch.sigmoid(cont_logit))
-                     next_value = best_future # The loop applies Gamma in the NEXT iteration
+                for i in reversed(range(len(step_results) - 1)):
+                    curr = step_results[i]
+                    # Target = Max(Immediate Reward, Discounted Future)
+                    discounted_future = next_value * GAMMA
+                    target_q = torch.maximum(curr["is_correct"], discounted_future).detach()
+                    
+                    # Losses
+                    halt_loss = F.binary_cross_entropy_with_logits(curr["q_logits"][:, 0], curr["is_correct"])
+                    cont_loss = F.binary_cross_entropy_with_logits(curr["q_logits"][:, 1], discounted_future)
+                    
+                    q_losses.append(halt_loss + cont_loss)
+                    
+                    # Update Value for next iteration (backwards)
+                    with torch.no_grad():
+                        pred_val = torch.maximum(torch.sigmoid(curr["q_logits"][:, 0]), torch.sigmoid(curr["q_logits"][:, 1]))
+                        next_value = pred_val
             
             avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(DEVICE)
             
-            # z_drift_loss = 0
-            # for res in step_results:
-            #     # res['z_final'] is (Input + OutputAdapter(z))
-            #     # We punish the MAGNITUDE of OutputAdapter(z)
-            #     z_drift = res['z_final'] - original_inputs # This is just z_out
-            #     z_drift_loss += z_drift.norm(p=2) 
+            # C. Drift Regularization (Tiny)
+            # Prevent the "Empty Output" bug
+            z_drift = 0
+            for res in step_results:
+                z_drift += (res['z_final'] - step_results[0]['z_final']).norm(p=2) # deviation from first thought
+            drift_loss = z_drift / (len(step_results) * BATCH_SIZE)
 
-            # avg_drift_loss = z_drift_loss / (len(step_results) * BATCH_SIZE)
-
-            # # Total Loss
-            # # LM + Q + tiny Drift penalty
-            # loss = lm_loss + (1.0 * avg_q_loss) + (0.01 * avg_drift_loss)
-            
             # Total Loss
-            loss = lm_loss + (1.0 * avg_q_loss) # Boost Q-Loss weight
+            loss = lm_loss + (q_loss_weight * avg_q_loss) + (0.001 * drift_loss)
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -440,14 +436,11 @@ def train():
             total_lm_loss += lm_loss.item()
             total_q_loss += avg_q_loss.item()
             
-        print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.3f} | Q Loss: {total_q_loss/len(dataloader):.3f}")
+        print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f}")
         
-        # Test
-        q = "predict next: 10 , 20 , 30"
-        print(f"  {q} -> {model.generate(q)}")
-
-        q = "predict next: 1, 1, 2, 3"
-        print(f"  {q} -> {model.generate(q)}")
+        # 4. RELEVANT TEST
+        # We now test on a SUDOKU string
+        print(f"  Test: {model.generate(test_puzzle)}")
 
 if __name__ == "__main__":
     train()
