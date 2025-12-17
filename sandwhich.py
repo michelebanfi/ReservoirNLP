@@ -71,8 +71,9 @@ class TextLogicDataset(Dataset):
         target_text = target_loc
 
         # 4. Tokenize
+        # NOTE: Use max_length=64 for labels to match SudokuDataset for batching compatibility
         source = self.tokenizer(input_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
-        target = self.tokenizer(target_text, max_length=10, padding="max_length", truncation=True, return_tensors="pt")
+        target = self.tokenizer(target_text, max_length=64, padding="max_length", truncation=True, return_tensors="pt")
 
         return {
             "input_ids": source.input_ids.squeeze(),
@@ -156,8 +157,9 @@ class SudokuDataset(Dataset):
         input_text = "solve sudoku: " + to_str(puzzle)
         target_text = to_str(solution)
 
+        # NOTE: Use max_length=64 for labels (enough for 4x4 board, matches TextLogicDataset)
         source = self.tokenizer(input_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
-        target = self.tokenizer(target_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
+        target = self.tokenizer(target_text, max_length=64, padding="max_length", truncation=True, return_tensors="pt")
 
         return {
             "input_ids": source.input_ids.squeeze(),
