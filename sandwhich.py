@@ -308,7 +308,8 @@ class NeuroSymbolicACT(nn.Module):
         B = input_ids.shape[0]
         
         with torch.no_grad():
-            enc_out = self.t5.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            # enc_out = self.t5.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            enc_out = self.t5.shared(input_ids)
             
         original_inputs = enc_out
         x = self.hrm.input_adapter(enc_out)
