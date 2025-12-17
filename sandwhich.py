@@ -247,13 +247,33 @@ class HRMBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
+class ContextualAdapter(nn.Module):
+    """
+    Reads a window of tokens to understand local grammar 
+    (e.g., 'moved to garden' vs 'moved from garden').
+    """
+    def __init__(self, dim):
+        super().__init__()
+        # Kernel size 3 looks at [Prev, Current, Next]
+        self.conv = nn.Conv1d(in_channels=dim, out_channels=dim, kernel_size=3, padding=1)
+        self.norm = nn.LayerNorm(dim)
+        self.gelu = nn.GELU()
+        
+    def forward(self, x):
+        # x: [Batch, Seq, Dim]
+        # Conv1d expects [Batch, Dim, Seq]
+        x = x.transpose(1, 2)
+        x = self.conv(x)
+        x = x.transpose(1, 2)
+        return self.gelu(self.norm(x))
+
 class ACTReasoningCore(nn.Module):
     def __init__(self, dim, num_heads):
         super().__init__()
         self.dim = dim
         
         # Adapters
-        self.input_adapter = nn.Sequential(nn.Linear(dim, dim), nn.LayerNorm(dim), nn.GELU())
+        self.input_adapter = ContextualAdapter(dim)
         self.output_adapter = nn.Linear(dim, dim)
         nn.init.zeros_(self.output_adapter.weight)
         nn.init.zeros_(self.output_adapter.bias)
@@ -511,8 +531,8 @@ def train():
         test_text = "track state: Mary went to the hallway. Mary moved to the office. Question: Where is Mary?"
         hard_text = "track state: John went to the garden. Mary moved to the kitchen. John moved to the office. Question: Where is John?"
 
-        print(f"  Test: {model.generate(test_text)}")
-        print(f"  Hard: {model.generate(hard_text)}")
+        print(f"INPUT: {test_text}  | OUTPUT: {model.generate(test_text)}")
+        print(f"INPUT: {hard_text}  | OUTPUT: {model.generate(hard_text)}")
 
         
 
