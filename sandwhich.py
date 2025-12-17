@@ -10,7 +10,7 @@ import numpy as np
 # --- CONFIGURATION ---
 MODEL_NAME = "t5-small"
 BATCH_SIZE = 16 # Reduced batch size as we run decoder multiple times
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 3e-4
 EPOCHS = 10
 SEQ_LEN = 128
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -165,6 +165,30 @@ class SudokuDataset(Dataset):
             "labels": target.input_ids.squeeze()
         }
 
+class MixedReasoningDataset(Dataset):
+    """
+    Combines TextLogicDataset and SudokuDataset for multi-task training.
+    Randomly samples from both datasets to train on diverse reasoning tasks.
+    """
+    def __init__(self, tokenizer, size=5000, text_logic_ratio=0.5):
+        self.tokenizer = tokenizer
+        self.size = size
+        self.text_logic_ratio = text_logic_ratio  # Probability of sampling TextLogic vs Sudoku
+        
+        # Initialize both sub-datasets
+        self.text_logic = TextLogicDataset(tokenizer, size=size)
+        self.sudoku = SudokuDataset(tokenizer, size=size)
+        
+    def __len__(self):
+        return self.size
+    
+    def __getitem__(self, idx):
+        # Randomly choose which dataset to sample from
+        if random.random() < self.text_logic_ratio:
+            return self.text_logic[idx]
+        else:
+            return self.sudoku[idx]
+
 # --- 1. DATASET (Same as before) ---
 class ComplexArithmeticDataset(Dataset):
     def __init__(self, tokenizer, size=5000):
@@ -311,6 +335,198 @@ class ACTReasoningCore(nn.Module):
         # z_state: [Batch, Seq, Dim] -> we take [Batch, 0, Dim]
         return self.q_head(z_state[:, 0, :])
 
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=512):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        # x: [Batch, Seq, Dim]
+        return x + self.pe[:x.size(1), :].unsqueeze(0)
+
+class NanoACT(nn.Module):
+    def __init__(self, tokenizer, d_model=256, n_heads=4, dropout=0.1):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
+        vocab_size = tokenizer.vocab_size
+        
+        # 1. Embeddings (Learned from scratch)
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model)
+        self.dropout = nn.Dropout(dropout)
+        
+        # 2. Mini Encoder (Just to parse syntax)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*2, batch_first=True, norm_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        
+        # 3. YOUR HRM CORE (The Brain)
+        self.hrm = ACTReasoningCore(dim=d_model, num_heads=n_heads)
+        
+        # 4. Mini Decoder (To translate thoughts to text)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*2, batch_first=True, norm_first=True)
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=2)
+        
+        # 5. Output Head
+        self.lm_head = nn.Linear(d_model, vocab_size)
+
+    def create_masks(self, src, tgt):
+        # Src Mask: [Batch, SrcSeq] (True = Pad)
+        src_key_padding_mask = (src == self.pad_token_id)
+        
+        # Tgt Mask: [Batch, TgtSeq]
+        tgt_key_padding_mask = (tgt == self.pad_token_id)
+        
+        # Tgt Causal Mask: [TgtSeq, TgtSeq] (Standard triangular mask)
+        sz = tgt.size(1)
+        tgt_mask = torch.triu(torch.ones(sz, sz, device=tgt.device) * float('-inf'), diagonal=1)
+        
+        return src_key_padding_mask, tgt_key_padding_mask, tgt_mask
+
+    def forward(self, input_ids, attention_mask=None, labels=None):
+        # NOTE: attention_mask from T5 tokenizer is 1 for Valid, 0 for Pad.
+        # PyTorch Transformer expects "True" for Pad. So we invert it or recalculate.
+        
+        # A. Encode
+        src_emb = self.dropout(self.pos_encoder(self.embedding(input_ids)))
+        # Invert T5 mask: 1->False (Valid), 0->True (Pad)
+        src_padding_mask = (input_ids == self.pad_token_id)
+        
+        memory = self.encoder(src_emb, src_key_padding_mask=src_padding_mask)
+        
+        # B. ACT REASONING LOOP (The Sandwich)
+        # We process the 'memory' from the encoder through the ACT loop
+        
+        # Prepare HRM inputs
+        B, L, D = memory.shape
+        x_in = self.hrm.input_adapter(memory)
+        z = self.hrm.state_init.expand(B, L, D)
+        x_in = x_in + self.hrm.pos_embed[:, :L, :]
+        
+        step_outputs = []
+        
+        # The Decoder needs a target to calculate loss
+        # If training, use labels. If inference, we can't fully run decoder loop here easily 
+        # without beam search, so we usually only run forward pass if labels exist.
+        
+        if labels is not None:
+            # Shift labels for teaching forcing: Input to decoder is [SOS, ...], Target is [..., EOS]
+            # T5 labels usually have -100 for ignored, we need to fix that for embedding lookup
+            decoder_input = labels.clone()
+            decoder_input[decoder_input == -100] = self.pad_token_id 
+            
+            # Shift right (naive implementation for demo)
+            # In real T5, the decoder_start_token_id is usually 0
+            sos_token = torch.full((B, 1), 0, device=labels.device, dtype=torch.long) # Assuming 0 is pad/start
+            decoder_input = torch.cat([sos_token, decoder_input[:, :-1]], dim=1)
+            
+            tgt_emb = self.dropout(self.pos_encoder(self.embedding(decoder_input)))
+            tgt_padding_mask = (decoder_input == self.pad_token_id)
+            tgt_causal_mask = torch.triu(torch.ones(decoder_input.size(1), decoder_input.size(1), device=labels.device) * float('-inf'), diagonal=1)
+
+            # ACT Loop
+            for step in range(MAX_ACT_STEPS):
+                # 1. Think
+                z = self.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long()) # mask: 1=valid
+                
+                # 2. Q-Head (Halting)
+                q_logits = self.hrm.predict_q(z)
+                
+                # 3. Create "Thought Vectors" for Decoder
+                z_out = self.hrm.output_adapter(z)
+                enhanced_memory = memory + z_out 
+                
+                # 4. Decode (Virtual Attempt)
+                # We feed the "enhanced memory" to the decoder
+                dec_out = self.decoder(
+                    tgt=tgt_emb,
+                    memory=enhanced_memory,
+                    tgt_mask=tgt_causal_mask,
+                    tgt_key_padding_mask=tgt_padding_mask,
+                    memory_key_padding_mask=src_padding_mask
+                )
+                
+                logits = self.lm_head(dec_out) # [B, TgtLen, Vocab]
+                
+                # 5. Calculate Loss for this step
+                # Flatten for CrossEntropy: [B*T, Vocab] vs [B*T]
+                loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+                lm_loss = loss_fct(logits.view(-1, vocab_size), labels.view(-1))
+                
+                # 6. Reward Calculation (for Q-Learning)
+                preds = logits.argmax(dim=-1)
+                mask = labels != -100
+                correct = (preds == labels) & mask
+                seq_correct = (correct.sum(dim=-1) == mask.sum(dim=-1)).float()
+                
+                step_outputs.append({
+                    "q_logits": q_logits,
+                    "lm_loss": lm_loss,
+                    "is_correct": seq_correct,
+                    "z_final": enhanced_memory
+                })
+        
+        return step_outputs
+
+    def generate(self, input_text, max_len=64):
+        # Simple Greedy Decoding for Inference
+        self.eval()
+        inputs = self.tokenizer(input_text, return_tensors="pt").to(DEVICE)
+        input_ids = inputs.input_ids
+        
+        # Encode & Think
+        with torch.no_grad():
+            src_emb = self.dropout(self.pos_encoder(self.embedding(input_ids)))
+            src_padding_mask = (input_ids == self.pad_token_id)
+            memory = self.encoder(src_emb, src_key_padding_mask=src_padding_mask)
+            
+            # ACT Loop (Inference)
+            B, L, D = memory.shape
+            x_in = self.hrm.input_adapter(memory)
+            z = self.hrm.state_init.expand(B, L, D)
+            x_in = x_in + self.hrm.pos_embed[:, :L, :]
+            
+            final_step = 0
+            for step in range(MAX_ACT_STEPS):
+                z = self.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long())
+                q_logits = self.hrm.predict_q(z)
+                if q_logits[0, 0] > q_logits[0, 1]: # Halt > Cont
+                    final_step = step + 1
+                    break
+                final_step = step + 1
+            
+            # Prepare Decoder Memory
+            z_out = self.hrm.output_adapter(z)
+            enhanced_memory = memory + z_out
+            
+            # Decode Loop
+            curr_tokens = torch.tensor([[0]], device=DEVICE) # Start token
+            for _ in range(max_len):
+                tgt_emb = self.dropout(self.pos_encoder(self.embedding(curr_tokens)))
+                tgt_causal_mask = torch.triu(torch.ones(curr_tokens.size(1), curr_tokens.size(1), device=DEVICE) * float('-inf'), diagonal=1)
+                
+                dec_out = self.decoder(
+                    tgt=tgt_emb,
+                    memory=enhanced_memory,
+                    tgt_mask=tgt_causal_mask,
+                    memory_key_padding_mask=src_padding_mask
+                )
+                logits = self.lm_head(dec_out[:, -1, :])
+                next_token = logits.argmax(dim=-1).unsqueeze(0)
+                
+                if next_token.item() == 1: # EOS token for T5 is usually 1
+                    break
+                    
+                curr_tokens = torch.cat([curr_tokens, next_token], dim=1)
+                
+        return self.tokenizer.decode(curr_tokens[0], skip_special_tokens=True) + f" (Steps: {final_step})"
+
 # --- 3. THE ACT SANDWICH ---
 class NeuroSymbolicACT(nn.Module):
     def __init__(self, base_model_name):
@@ -436,42 +652,42 @@ class NeuroSymbolicACT(nn.Module):
 # --- 4. TRAINING WITH Q-LOSS ---
 def train():
     # 1. SETUP
-    model = NeuroSymbolicACT(MODEL_NAME).to(DEVICE)
-    dataset = TextLogicDataset(model.tokenizer, size=5000)
+    tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME)
+    model = NanoACT(tokenizer).to(DEVICE)
+    
+    # Use the new MixedReasoningDataset (50% TextLogic, 50% Sudoku)
+    dataset = MixedReasoningDataset(tokenizer, size=5000, text_logic_ratio=0.5)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate LRs for Stability
     optimizer = torch.optim.AdamW([
         {'params': model.hrm.q_head.parameters(), 'lr': 5e-4},
-        {'params': [p for n, p in model.hrm.named_parameters() if 'q_head' not in n], 'lr': 1e-4}
+        {'params': [p for n, p in model.hrm.named_parameters() if 'q_head' not in n], 'lr': 1e-4},
+        {'params': [p for n, p in model.named_parameters() if 'hrm' not in n], 'lr': 1e-4}  # Encoder/Decoder/Embeddings
     ])
 
     model.train()
-    print("\nTraining TextReasoning-ACT (with Mask Fix & Warmup)...")
+    print("\nTraining NanoACT on Mixed Reasoning Dataset (TextLogic + Sudoku)...")
     
-    # 2. DEFINE A VALID TEST PUZZLE
-    # A simple 4x4 puzzle with one missing number (top-left should be 1)
-    # Row 1: . 2 3 4 | Row 2: 3 4 1 2 | Row 3: 2 1 4 3 | Row 4: 4 3 2 1
-    test_puzzle = "solve sudoku: 0 2 3 4 | 3 4 1 2 | 2 1 4 3 | 4 3 2 1"
-    
-    # 4. RELEVANT TEST
-    # We now test on a Placement string
+    # 2. TEST CASES FOR BOTH TASKS
+    # TextLogic tests
     test_text = "track state: Mary went to the hallway. Mary moved to the office. Question: Where is Mary?"
     hard_text = "track state: John went to the garden. Mary moved to the kitchen. John moved to the office. Question: Where is John?"
     
-    print(f"INPUT for EASY TASK: {test_text}")
-    print(f"INPUT for HARD TASK: {hard_text}")
+    # Sudoku test (simple puzzle with one missing number - top-left should be 1)
+    test_sudoku = "solve sudoku: 0 2 3 4 | 3 4 1 2 | 2 1 4 3 | 4 3 2 1"
     
-    # Standard T5 baseline output (frozen, so always the same)
-    with torch.no_grad():
-        easy_inputs = model.tokenizer(test_text, return_tensors="pt").to(DEVICE)
-        hard_inputs = model.tokenizer(hard_text, return_tensors="pt").to(DEVICE)
-        t5_easy_out = model.t5.generate(easy_inputs.input_ids, max_length=64)
-        t5_hard_out = model.t5.generate(hard_inputs.input_ids, max_length=64)
-        t5_easy_text = model.tokenizer.decode(t5_easy_out[0], skip_special_tokens=True)
-        t5_hard_text = model.tokenizer.decode(t5_hard_out[0], skip_special_tokens=True)
-    print(f"EASY T5 BASELINE: {t5_easy_text}")
-    print(f"HARD T5 BASELINE: {t5_hard_text}")
+    print(f"\n--- TEST CASES ---")
+    print(f"EASY TextLogic: {test_text}")
+    print(f"HARD TextLogic: {hard_text}")
+    print(f"SUDOKU: {test_sudoku}")
+    print("-" * 50)
+    
+    # Print initial (untrained) outputs
+    print(f"\\n--- INITIAL (UNTRAINED) OUTPUTS ---")
+    print(f"EASY TextLogic: {model.generate(test_text)}")
+    print(f"HARD TextLogic: {model.generate(hard_text)}")
+    print(f"SUDOKU: {model.generate(test_sudoku)}")
     print("-" * 50)
     
     for epoch in range(EPOCHS):
@@ -546,8 +762,12 @@ def train():
             
         print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f}")
         
-        print(f"EASY ACT-HRM OUTPUT: {model.generate(test_text)}")
-        print(f"HARD ACT-HRM OUTPUT: {model.generate(hard_text)}")
+        # Test on all task types
+        model.eval()
+        print(f"  EASY TextLogic: {model.generate(test_text)}")
+        print(f"  HARD TextLogic: {model.generate(hard_text)}")
+        print(f"  SUDOKU: {model.generate(test_sudoku)}")
+        model.train()
         print("-" * 50)
 
         
