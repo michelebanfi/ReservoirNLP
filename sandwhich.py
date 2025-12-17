@@ -316,34 +316,43 @@ class NeuroSymbolicACT(nn.Module):
     def generate(self, input_text):
         inputs = self.tokenizer(input_text, return_tensors="pt").to(DEVICE)
         
-        # Same init logic
         with torch.no_grad():
+            # 1. Encode
             enc_out = self.t5.encoder(inputs.input_ids).last_hidden_state
+            
+            # 2. ACT Loop
             original_inputs = enc_out
             x = self.hrm.input_adapter(enc_out)
             z = self.hrm.state_init.expand(1, x.shape[1], x.shape[2])
             x = x + self.hrm.pos_embed[:, :x.shape[1], :]
             
+            # Use the MASK (Fixed logic)
+            mask = inputs.attention_mask
+            
+            final_step = 0
             for step in range(MAX_ACT_STEPS):
-                z = self.hrm.forward_step(z, x)
+                z = self.hrm.forward_step(z, x, mask=mask)
                 q_logits = self.hrm.predict_q(z)
                 
                 halt = q_logits[0, 0]
                 cont = q_logits[0, 1]
                 
-                # Stop?
                 if halt > cont:
+                    final_step = step + 1
                     break
+                final_step = step + 1
             
-            # Decode final state
+            # 3. Decode
             z_out = self.hrm.output_adapter(z)
             final_vec = original_inputs + z_out
             
             from transformers.modeling_outputs import BaseModelOutput
             dummy = BaseModelOutput(last_hidden_state=final_vec)
-            gen = self.t5.generate(encoder_outputs=dummy, max_length=10)
             
-        return self.tokenizer.decode(gen[0], skip_special_tokens=True) + f" (Steps: {step+1})"
+            # FIX: Increase max_length to 64 to see the whole board
+            gen = self.t5.generate(encoder_outputs=dummy, max_length=64)
+            
+        return self.tokenizer.decode(gen[0], skip_special_tokens=True) + f" (Steps: {final_step})"
 
 # --- 4. TRAINING WITH Q-LOSS ---
 def train():
@@ -441,6 +450,11 @@ def train():
         # 4. RELEVANT TEST
         # We now test on a SUDOKU string
         print(f"  Test: {model.generate(test_puzzle)}")
+
+        hard_puzzle = "solve sudoku: 0 0 3 4 | 0 4 1 2 | 2 1 0 3 | 4 3 2 1"
+        print(f"HARD TEST: {model.generate(hard_puzzle)}")
+
+        
 
 if __name__ == "__main__":
     train()
