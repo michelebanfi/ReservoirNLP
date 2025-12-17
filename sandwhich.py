@@ -180,8 +180,10 @@ class HRMBlock(nn.Module):
         self.norm2 = RMSNorm(dim)
         self.mlp = SwiGLU(dim, int(dim * 4 * 2 / 3)) 
 
-    def forward(self, x):
-        attn_out, _ = self.attn(x, x, x)
+    def forward(self, x, key_padding_mask=None):
+        # Pass the mask to attention
+        # key_padding_mask: [Batch, SeqLen] where True = PAD (ignore)
+        attn_out, _ = self.attn(x, x, x, key_padding_mask=key_padding_mask)
         x = x + attn_out
         x = x + self.mlp(self.norm2(x))
         return x
@@ -212,12 +214,17 @@ class ACTReasoningCore(nn.Module):
         self.state_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.pos_embed = nn.Parameter(torch.randn(1, SEQ_LEN, dim) * 0.02)
 
-    def forward_step(self, z_state, x_input):
+    def forward_step(self, z_state, x_input, mask=None):
         # One Step of Thinking
-        # Input Injection
         context = z_state + x_input
         z_next = self.norm_fusion(z_state + context)
-        z_next = self.Block(z_next)
+        
+        # Invert mask for PyTorch MultiheadAttention if necessary
+        # T5 mask: 1=Valid, 0=Pad. 
+        # PyTorch key_padding_mask: True=Pad, False=Valid.
+        padding_mask = (mask == 0) if mask is not None else None
+        
+        z_next = self.Block(z_next, key_padding_mask=padding_mask)
         return z_next
 
     def predict_q(self, z_state):
@@ -241,28 +248,20 @@ class NeuroSymbolicACT(nn.Module):
     def forward(self, input_ids, attention_mask, labels=None):
         B = input_ids.shape[0]
         
-        # 1. Encode
         with torch.no_grad():
             enc_out = self.t5.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
             
-        # 2. Initialize ACT
         original_inputs = enc_out
         x = self.hrm.input_adapter(enc_out)
         z = self.hrm.state_init.expand(B, x.shape[1], x.shape[2])
         x = x + self.hrm.pos_embed[:, :x.shape[1], :]
         
-        # ACT Storage
         step_outputs = []
-        
-        # 3. Dynamic Loop
-        # In training, we run ALL steps to gather data for Q-learning
-        # In inference, we stop when Q says stop
-        
         steps_to_run = MAX_ACT_STEPS
         
         for step in range(steps_to_run):
-            # A. Think
-            z = self.hrm.forward_step(z, x)
+            # PASS THE MASK HERE
+            z = self.hrm.forward_step(z, x, mask=attention_mask)
             
             # B. Check Halting (Q-Values)
             q_logits = self.hrm.predict_q(z) # [Batch, 2]
