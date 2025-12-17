@@ -462,6 +462,18 @@ def train():
     print(f"INPUT for EASY TASK: {test_text}")
     print(f"INPUT for HARD TASK: {hard_text}")
     
+    # Standard T5 baseline output (frozen, so always the same)
+    with torch.no_grad():
+        easy_inputs = model.tokenizer(test_text, return_tensors="pt").to(DEVICE)
+        hard_inputs = model.tokenizer(hard_text, return_tensors="pt").to(DEVICE)
+        t5_easy_out = model.t5.generate(easy_inputs.input_ids, max_length=64)
+        t5_hard_out = model.t5.generate(hard_inputs.input_ids, max_length=64)
+        t5_easy_text = model.tokenizer.decode(t5_easy_out[0], skip_special_tokens=True)
+        t5_hard_text = model.tokenizer.decode(t5_hard_out[0], skip_special_tokens=True)
+    print(f"EASY T5 BASELINE: {t5_easy_text}")
+    print(f"HARD T5 BASELINE: {t5_hard_text}")
+    print("-" * 50)
+    
     for epoch in range(EPOCHS):
         # 3. WARMUP LOGIC
         # First 5 epochs: Force 6 steps of thinking, Ignore Q-Loss.
@@ -534,19 +546,7 @@ def train():
             
         print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f}")
         
-        # Standard T5 output for comparison
-        with torch.no_grad():
-            easy_inputs = model.tokenizer(test_text, return_tensors="pt").to(DEVICE)
-            hard_inputs = model.tokenizer(hard_text, return_tensors="pt").to(DEVICE)
-            t5_easy_out = model.t5.generate(easy_inputs.input_ids, max_length=64)
-            t5_hard_out = model.t5.generate(hard_inputs.input_ids, max_length=64)
-            t5_easy_text = model.tokenizer.decode(t5_easy_out[0], skip_special_tokens=True)
-            t5_hard_text = model.tokenizer.decode(t5_hard_out[0], skip_special_tokens=True)
-
-        print(f"EASY T5 OUTPUT:      {t5_easy_text}")
         print(f"EASY ACT-HRM OUTPUT: {model.generate(test_text)}")
-        print("")
-        print(f"HARD T5 OUTPUT:      {t5_hard_text}")
         print(f"HARD ACT-HRM OUTPUT: {model.generate(hard_text)}")
         print("-" * 50)
 
