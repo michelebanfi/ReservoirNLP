@@ -560,13 +560,21 @@ def train():
             loss = lm_loss + (q_loss_weight * avg_q_loss) + (drift_weight * drift_loss)
             
             loss.backward()
+            
+            with torch.no_grad():
+                # Measure how much the thought vector changed
+                z_start = step_results[0]['z_final']
+                z_end = step_results[-1]['z_final']
+                dist = torch.norm(z_end - z_start, p=2).mean().item()
+    
+    
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
             total_lm_loss += lm_loss.item()
             total_q_loss += avg_q_loss.item()
             
-        print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f}")
+        print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f} | Thought Drift: {dist:.4f}")
         
         # Test on all task types
         # model.eval()
