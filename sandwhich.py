@@ -458,7 +458,7 @@ class NanoACT(nn.Module):
 
 def train():
     # 1. SETUP
-    tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME, legacy=False)
+    tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME, legacy=True)
     model = NanoACT(tokenizer).to(DEVICE)
     
     # Use the new MixedReasoningDataset (50% TextLogic, 50% Sudoku)
