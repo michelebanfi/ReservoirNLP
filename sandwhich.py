@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import T5Tokenizer
 import random
 import math
 import numpy as np
@@ -283,7 +283,7 @@ class NanoACT(nn.Module):
         
         # 2. Mini Encoder (Just to parse syntax)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*2, batch_first=True, norm_first=True)
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False)
         
         # 3. YOUR HRM CORE (The Brain)
         self.hrm = ACTReasoningCore(dim=d_model, num_heads=n_heads)
@@ -347,7 +347,7 @@ class NanoACT(nn.Module):
             
             tgt_emb = self.dropout(self.pos_encoder(self.embedding(decoder_input)))
             tgt_padding_mask = (decoder_input == self.pad_token_id)
-            tgt_causal_mask = torch.triu(torch.ones(decoder_input.size(1), decoder_input.size(1), device=labels.device) * float('-inf'), diagonal=1)
+            tgt_causal_mask = torch.triu(torch.ones(decoder_input.size(1), decoder_input.size(1), device=labels.device, dtype=tgt_padding_mask.dtype), diagonal=1)
 
             # ACT Loop
             for step in range(MAX_ACT_STEPS):
@@ -438,7 +438,7 @@ class NanoACT(nn.Module):
             curr_tokens = torch.tensor([[0]], device=DEVICE) # Start token
             for _ in range(max_len):
                 tgt_emb = self.dropout(self.pos_encoder(self.embedding(curr_tokens)))
-                tgt_causal_mask = torch.triu(torch.ones(curr_tokens.size(1), curr_tokens.size(1), device=DEVICE) * float('-inf'), diagonal=1)
+                tgt_causal_mask = torch.triu(torch.ones(curr_tokens.size(1), curr_tokens.size(1), device=DEVICE, dtype=torch.bool), diagonal=1)
                 
                 dec_out = self.decoder(
                     tgt=tgt_emb,
@@ -458,7 +458,7 @@ class NanoACT(nn.Module):
 
 def train():
     # 1. SETUP
-    tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME, legacy=False)
     model = NanoACT(tokenizer).to(DEVICE)
     
     # Use the new MixedReasoningDataset (50% TextLogic, 50% Sudoku)
@@ -569,12 +569,12 @@ def train():
         print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f}")
         
         # Test on all task types
-        model.eval()
-        print(f"  EASY TextLogic: {model.generate(test_text)}")
-        print(f"  HARD TextLogic: {model.generate(hard_text)}")
-        print(f"  SUDOKU: {model.generate(test_sudoku)}")
-        model.train()
-        print("-" * 50)
+        # model.eval()
+        # print(f"  EASY TextLogic: {model.generate(test_text)}")
+        # print(f"  HARD TextLogic: {model.generate(hard_text)}")
+        # print(f"  SUDOKU: {model.generate(test_sudoku)}")
+        # model.train()
+        # print("-" * 50)
         
         def debug_inference(model, text, force_steps=8):
             model.eval()
@@ -605,7 +605,7 @@ def train():
                 curr_tokens = torch.tensor([[0]], device=DEVICE) 
                 for _ in range(64):
                     tgt_emb = model.dropout(model.pos_encoder(model.embedding(curr_tokens)))
-                    tgt_causal_mask = torch.triu(torch.ones(curr_tokens.size(1), curr_tokens.size(1), device=DEVICE) * float('-inf'), diagonal=1)
+                    tgt_causal_mask = torch.triu(torch.ones(curr_tokens.size(1), curr_tokens.size(1), device=DEVICE, dtype=torch.bool), diagonal=1)
                     
                     dec_out = model.decoder(
                         tgt=tgt_emb, 
