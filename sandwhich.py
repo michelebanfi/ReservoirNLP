@@ -191,33 +191,45 @@ class HRMBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
-class ContextualAdapter(nn.Module):
+class IterativeRefinementAdapter(nn.Module):
     """
-    Reads a window of tokens to understand local grammar 
-    (e.g., 'moved to garden' vs 'moved from garden').
+    Gated adapter that enables iterative refinement of thoughts.
+    Uses a gate to control how much new information flows in at each step.
     """
     def __init__(self, dim):
         super().__init__()
-        # Kernel size 3 looks at [Prev, Current, Next]
-        self.conv = nn.Conv1d(in_channels=dim, out_channels=dim, kernel_size=3, padding=1)
+        # Project input to hidden space
+        self.input_proj = nn.Linear(dim, dim)
+        # Gate decides how much to update
+        self.gate_proj = nn.Linear(dim * 2, dim)
+        # Step embedding to differentiate reasoning steps
+        self.step_embed = nn.Embedding(MAX_ACT_STEPS + 1, dim)
         self.norm = nn.LayerNorm(dim)
-        self.gelu = nn.GELU()
         
-    def forward(self, x):
+    def forward(self, x, step=0):
         # x: [Batch, Seq, Dim]
-        # Conv1d expects [Batch, Dim, Seq]
-        x = x.transpose(1, 2)
-        x = self.conv(x)
-        x = x.transpose(1, 2)
-        return self.gelu(self.norm(x))
+        B, L, D = x.shape
+        
+        # Add step information
+        step_emb = self.step_embed(torch.tensor(step, device=x.device)).unsqueeze(0).unsqueeze(0)
+        step_emb = step_emb.expand(B, L, D)
+        
+        # Project and combine with step info
+        x_proj = self.input_proj(x)
+        
+        # Gate based on original + step info
+        gate_input = torch.cat([x, step_emb], dim=-1)
+        gate = torch.sigmoid(self.gate_proj(gate_input))
+        
+        return self.norm(gate * x_proj + (1 - gate) * x)
 
 class ACTReasoningCore(nn.Module):
     def __init__(self, dim, num_heads):
         super().__init__()
         self.dim = dim
         
-        # Adapters
-        self.input_adapter = ContextualAdapter(dim)
+        # Adapters - now with step-aware refinement
+        self.input_adapter = IterativeRefinementAdapter(dim)
         self.output_adapter = nn.Linear(dim, dim)
         nn.init.zeros_(self.output_adapter.weight)
         nn.init.zeros_(self.output_adapter.bias)
@@ -232,22 +244,31 @@ class ACTReasoningCore(nn.Module):
         # Reasoning Blocks (H/L simplified to 1 layer each for speed in ACT loop)
         self.Block = HRMBlock(dim, num_heads)
         self.norm_fusion = nn.LayerNorm(dim)
+        
+        # Cross-attention for better state-input mixing
+        self.cross_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, batch_first=True)
+        self.cross_norm = nn.LayerNorm(dim)
 
         # Init States
         self.state_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.pos_embed = nn.Parameter(torch.randn(1, SEQ_LEN, dim) * 0.02)
 
-    def forward_step(self, z_state, x_input, mask=None):
-        # One Step of Thinking
-        context = z_state + x_input
-        z_next = self.norm_fusion(z_state + context)
+    def forward_step(self, z_state, x_input, mask=None, step=0):
+        # One Step of Thinking with Cross-Attention Fusion
         
-        # Invert mask for PyTorch MultiheadAttention if necessary
+        # Invert mask for PyTorch MultiheadAttention
         # T5 mask: 1=Valid, 0=Pad. 
         # PyTorch key_padding_mask: True=Pad, False=Valid.
         padding_mask = (mask == 0) if mask is not None else None
         
-        z_next = self.Block(z_next, key_padding_mask=padding_mask)
+        # Cross-attention: state attends to input (state = query, input = key/value)
+        # This allows the state to "read" from the input at each step
+        cross_out, _ = self.cross_attn(z_state, x_input, x_input, key_padding_mask=padding_mask)
+        z_fused = self.cross_norm(z_state + cross_out)
+        
+        # Self-attention reasoning on the fused representation
+        z_next = self.Block(z_fused, key_padding_mask=padding_mask)
+        
         return z_next
 
     def predict_q(self, z_state):
@@ -324,9 +345,9 @@ class NanoACT(nn.Module):
         
         # Prepare HRM inputs
         B, L, D = memory.shape
-        x_in = self.hrm.input_adapter(memory)
         z = self.hrm.state_init.expand(B, L, D)
-        x_in = x_in + self.hrm.pos_embed[:, :L, :]
+        # Add positional embedding to memory (input_adapter called per-step now)
+        memory_pos = memory + self.hrm.pos_embed[:, :L, :]
         
         step_outputs = []
         
@@ -351,8 +372,11 @@ class NanoACT(nn.Module):
 
             # ACT Loop
             for step in range(MAX_ACT_STEPS):
-                # 1. Think
-                z = self.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long()) # mask: 1=valid
+                # 1. Adapt input based on current step (allows iterative refinement)
+                x_in = self.hrm.input_adapter(memory_pos, step=step)
+                
+                # 2. Think
+                z = self.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long(), step=step) # mask: 1=valid
                 
                 # 2. Q-Head (Halting)
                 q_logits = self.hrm.predict_q(z)
@@ -417,13 +441,13 @@ class NanoACT(nn.Module):
             
             # ACT Loop (Inference)
             B, L, D = memory.shape
-            x_in = self.hrm.input_adapter(memory)
             z = self.hrm.state_init.expand(B, L, D)
-            x_in = x_in + self.hrm.pos_embed[:, :L, :]
+            memory_pos = memory + self.hrm.pos_embed[:, :L, :]
             
             final_step = 0
             for step in range(MAX_ACT_STEPS):
-                z = self.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long())
+                x_in = self.hrm.input_adapter(memory_pos, step=step)
+                z = self.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long(), step=step)
                 q_logits = self.hrm.predict_q(z)
                 if q_logits[0, 0] > q_logits[0, 1]: # Halt > Cont
                     final_step = step + 1
@@ -549,23 +573,25 @@ def train():
             
             avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(DEVICE)
             
-            # C. Drift Regularization (Tiny)
-            # Prevent the "Empty Output" bug
+            # C. Encourage Drift (we WANT the thinking to change the representation)
+            # Reward the model for actually using the reasoning steps
             z_drift = 0
             for res in step_results:
-                z_drift += (res['z_final'] - step_results[0]['z_final']).norm(p=2) # deviation from first thought
-            drift_loss = z_drift / (len(step_results) * BATCH_SIZE)
-            drift_weight = 0.1
+                z_drift += (res['z_final'] - step_results[0]['z_final']).norm(p=2)
+            avg_drift = z_drift / (len(step_results) * BATCH_SIZE)
+            # Small bonus for using the thinking steps (negative weight = reward drift)
+            drift_bonus = -0.01 * torch.clamp(avg_drift, max=1.0)  # Capped to prevent instability
+            
             # Total Loss
-            loss = lm_loss + (q_loss_weight * avg_q_loss) + (drift_weight * drift_loss)
+            loss = lm_loss + (q_loss_weight * avg_q_loss) + drift_bonus
             
             loss.backward()
             
             with torch.no_grad():
-                # Measure how much the thought vector changed
+                # Measure how much the thought vector changed (higher = more thinking)
                 z_start = step_results[0]['z_final']
                 z_end = step_results[-1]['z_final']
-                dist = torch.norm(z_end - z_start, p=2).mean().item()
+                drift = torch.norm(z_end - z_start, p=2).mean().item()
     
     
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -574,7 +600,7 @@ def train():
             total_lm_loss += lm_loss.item()
             total_q_loss += avg_q_loss.item()
             
-        print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f} | Thought Drift: {dist:.4f}")
+        print(f"Epoch {epoch+1} | LM Loss: {total_lm_loss/len(dataloader):.4f} | Q Loss: {total_q_loss/len(dataloader):.4f} | Thought Drift: {drift:.4f}")
         
         # Test on all task types
         # model.eval()
@@ -597,13 +623,13 @@ def train():
                 
                 # ACT Loop (Force Steps)
                 B, L, D = memory.shape
-                x_in = model.hrm.input_adapter(memory)
                 z = model.hrm.state_init.expand(B, L, D)
-                x_in = x_in + model.hrm.pos_embed[:, :L, :]
+                memory_pos = memory + model.hrm.pos_embed[:, :L, :]
                 
                 # FORCE THE THINKING
                 for step in range(force_steps):
-                    z = model.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long())
+                    x_in = model.hrm.input_adapter(memory_pos, step=step)
+                    z = model.hrm.forward_step(z, x_in, mask=(~src_padding_mask).long(), step=step)
                     
                 # Decode
                 z_out = model.hrm.output_adapter(z)
@@ -633,7 +659,7 @@ def train():
         # print("1 Step (Lazy):", debug_inference(model, bad_sudoku, force_steps=1))
         # print("8 Steps (Forced):", debug_inference(model, bad_sudoku, force_steps=8))
         
-        test = "add 48 + 53"
+        test = "add: 48 + 53"  # Fixed: added colon to match dataset format
         print("Test Addition (1 Step):", debug_inference(model, test, force_steps=1))
         print("Test Addition (8 Steps):", debug_inference(model, test, force_steps=8))
 
