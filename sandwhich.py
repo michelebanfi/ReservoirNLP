@@ -11,7 +11,7 @@ import numpy as np
 MODEL_NAME = "t5-small"
 BATCH_SIZE = 16 # Reduced batch size as we run decoder multiple times
 LEARNING_RATE = 3e-4
-EPOCHS = 15
+EPOCHS = 10
 SEQ_LEN = 128
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -129,61 +129,22 @@ class HeterogeneousDataset(Dataset):
         }
 
 class AdditionDataset(Dataset):
-    """
-    Addition dataset with curriculum learning and digit-spaced format.
-    - Spaces digits for consistent tokenization: "1 2 3" not "123"
-    - Reverses output for easier carry propagation learning
-    - Curriculum: starts with 1-2 digit numbers, gradually increases
-    """
-    def __init__(self, tokenizer, size=10000, max_digits=3, epoch=0):
+    def __init__(self, tokenizer, size=10000):
         self.tokenizer = tokenizer
         self.size = size
-        self.max_digits = max_digits
-        self.epoch = epoch
-
-    def set_epoch(self, epoch):
-        """Update epoch for curriculum learning"""
-        self.epoch = epoch
 
     def __len__(self):
         return self.size
 
-    def _space_digits(self, num):
-        """Convert 123 -> '1 2 3' for consistent tokenization"""
-        return ' '.join(str(num))
-    
-    def _reverse_digits(self, num):
-        """Reverse for easier carry learning: 123 -> '3 2 1'"""
-        return ' '.join(reversed(str(num)))
-
     def __getitem__(self, idx):
-        # Curriculum learning: start easy, get harder
-        # Epoch 0-2: 1-2 digits, Epoch 3-5: 1-3 digits, Epoch 6+: 1-max_digits
-        if self.epoch < 3:
-            max_d = 2
-        elif self.epoch < 6:
-            max_d = min(3, self.max_digits)
-        else:
-            max_d = self.max_digits
+        # Generate two numbers (2-4 digits)
+        digits = random.randint(2, 4)
+        a = random.randint(10**(digits-1), 10**digits - 1)
+        b = random.randint(10**(digits-1), 10**digits - 1)
         
-        digits = random.randint(1, max_d)
-        
-        # Generate numbers
-        if digits == 1:
-            a = random.randint(1, 9)
-            b = random.randint(1, 9)
-        else:
-            a = random.randint(10**(digits-1), 10**digits - 1)
-            b = random.randint(10**(digits-1), 10**digits - 1)
-        
-        result = a + b
-        
-        # Format: "add: 4 8 + 5 3" -> "1 0 1" (or reversed: "1 0 1")
-        input_text = f"add: {self._space_digits(a)} + {self._space_digits(b)}"
-        # Regular order (not reversed) - reversed can be tried if this doesn't work
-        target_text = self._space_digits(result)
+        input_text = f"add: {a} + {b}"
+        target_text = str(a + b)
 
-        # Tokenize
         source = self.tokenizer(input_text, max_length=32, padding="max_length", truncation=True, return_tensors="pt")
         target = self.tokenizer(target_text, max_length=16, padding="max_length", truncation=True, return_tensors="pt")
 
@@ -521,8 +482,8 @@ def train():
     tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME, legacy=True)
     model = NanoACT(tokenizer).to(DEVICE)
     
-    # Use AdditionDataset with curriculum learning
-    dataset = AdditionDataset(tokenizer, size=8000, max_digits=3, epoch=0)
+    # Use HeterogeneousDataset for diverse reasoning tasks
+    dataset = HeterogeneousDataset(tokenizer, size=10000)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate LRs for Stability
@@ -557,11 +518,7 @@ def train():
     # print("-" * 50)
     
     for epoch in range(EPOCHS):
-        # Update curriculum
-        dataset.set_epoch(epoch)
-        
-        # 3. WARMUP LOGIC
-        # First 5 epochs: Force 6 steps of thinking, Ignore Q-Loss.
+        # First 5 epochs: Force thinking, Ignore Q-Loss.
         # This helps the HRM learn "how to think" before "when to stop".
         is_warmup = epoch < 5
         q_loss_weight = 0.0 if is_warmup else 1.0
@@ -612,25 +569,19 @@ def train():
             
             avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(DEVICE)
             
-            # C. Encourage Drift (we WANT the thinking to change the representation)
-            # Reward the model for actually using the reasoning steps
+            # C. Track Drift (for logging only, no longer part of loss)
             z_drift = 0
             for res in step_results:
                 z_drift += (res['z_final'] - step_results[0]['z_final']).norm(p=2)
-            avg_drift = z_drift / (len(step_results) * BATCH_SIZE)
-            # Small bonus for using the thinking steps (negative weight = reward drift)
-            drift_bonus = -0.01 * torch.clamp(avg_drift, max=1.0)  # Capped to prevent instability
             
-            # Total Loss
-            loss = lm_loss + (q_loss_weight * avg_q_loss) + drift_bonus
+            # Total Loss (simplified - drift was causing instability)
+            loss = lm_loss + (q_loss_weight * avg_q_loss)
             
             loss.backward()
             
             with torch.no_grad():
                 # Measure how much the thought vector changed (higher = more thinking)
-                z_start = step_results[0]['z_final']
-                z_end = step_results[-1]['z_final']
-                drift = torch.norm(z_end - z_start, p=2).mean().item()
+                drift = z_drift.item() / (len(step_results) * BATCH_SIZE)
     
     
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -693,15 +644,24 @@ def train():
                     
             return model.tokenizer.decode(curr_tokens[0], skip_special_tokens=True)
 
-        # Test with spaced digit format (matching training data)
-        test_easy = "add: 4 + 5"  # = 9
-        test_med = "add: 4 8 + 5 3"  # = 101 -> "1 0 1"
-        test_hard = "add: 1 2 3 + 4 5 6"  # = 579 -> "5 7 9"
+        # Test diverse tasks - compare 1-step vs 8-step reasoning
+        tests = [
+            ("calc: (3 + 5) * 2", "16"),           # Arithmetic: needs order of operations
+            ("sort: 42 17 8 31", "8 17 31 42"),    # Sorting: global comparison
+            ("reverse: a b c d e", "e d c b a"),   # Reversal: positional
+            ("track: John went to kitchen. John moved to garden. Where is John?", "garden"),  # Logic
+            ("parity: 3 4 2 1", "even"),           # Parity: sum=10
+        ]
         
-        print(f"  Easy (4+5=9):   1-step: {debug_inference(model, test_easy, 1)} | 8-step: {debug_inference(model, test_easy, 8)}")
-        print(f"  Med (48+53=101): 1-step: {debug_inference(model, test_med, 1)} | 8-step: {debug_inference(model, test_med, 8)}")
-        if epoch >= 5:  # Only test hard after curriculum progresses
-            print(f"  Hard (123+456=579): 1-step: {debug_inference(model, test_hard, 1)} | 8-step: {debug_inference(model, test_hard, 8)}")
+        print(f"  {'Task':<12} | {'Expected':<12} | {'1-step':<12} | {'8-step':<12}")
+        print(f"  {'-'*12} | {'-'*12} | {'-'*12} | {'-'*12}")
+        for test_input, expected in tests:
+            task_name = test_input.split(':')[0]
+            out_1 = debug_inference(model, test_input, 1)
+            out_8 = debug_inference(model, test_input, 8)
+            match_1 = '✓' if out_1.strip() == expected else ''
+            match_8 = '✓' if out_8.strip() == expected else ''
+            print(f"  {task_name:<12} | {expected:<12} | {out_1:<10}{match_1:<2} | {out_8:<10}{match_8:<2}")
 
 
 if __name__ == "__main__":
