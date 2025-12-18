@@ -171,7 +171,7 @@ class HeterogeneousDataset(Dataset):
     def __init__(self, tokenizer, size=10000):
         self.tokenizer = tokenizer
         self.size = size
-        self.tasks = ['arithmetic', 'sort', 'reverse', 'logic']
+        self.tasks = ['arithmetic', 'sort', 'reverse', 'logic', 'parity']
 
     def __len__(self):
         return self.size
@@ -188,6 +188,8 @@ class HeterogeneousDataset(Dataset):
             return self.gen_reverse()
         elif task == 'logic':
             return self.gen_logic()
+        elif task == 'parity':
+            return self.gen_parity_task()
 
     # --- TASK 1: Sequential Arithmetic ---
     # Forces the model to hold a value in memory
@@ -249,6 +251,17 @@ class HeterogeneousDataset(Dataset):
         
         input_text = f"track: {story} {question}"
         target_text = l2
+        return self.format(input_text, target_text)
+    
+    def gen_parity_task(self):
+        # Task: "Is the sum of these numbers Even or Odd?"
+        # This forces the model to track a running total (State).
+        nums = [random.randint(1, 9) for _ in range(random.randint(4, 8))]
+        input_text = "parity: " + " ".join(map(str, nums))
+        
+        total = sum(nums)
+        target_text = "even" if total % 2 == 0 else "odd"
+        
         return self.format(input_text, target_text)
 
     def format(self, input_text, target_text):
@@ -486,7 +499,7 @@ class NanoACT(nn.Module):
         
         return src_key_padding_mask, tgt_key_padding_mask, tgt_mask
 
-    def forward(self, input_ids, attention_mask=None, labels=None):
+    def forward(self, input_ids, attention_mask=None, labels=None, epoch=0):
         # NOTE: attention_mask from T5 tokenizer is 1 for Valid, 0 for Pad.
         # PyTorch Transformer expects "True" for Pad. So we invert it or recalculate.
         
@@ -537,7 +550,17 @@ class NanoACT(nn.Module):
                 
                 # 3. Create "Thought Vectors" for Decoder
                 z_out = self.hrm.output_adapter(z)
-                enhanced_memory = memory + z_out 
+                
+                if self.training and epoch < 2: 
+                    # PHASE 1: FORCE THINKING
+                    # During early training, we BLOCK the encoder memory.
+                    # The Decoder sees ONLY the thought.
+                    enhanced_memory = z_out 
+                else:
+                    # PHASE 2: ENABLE RESIDUAL
+                    # Once the HRM learns to carry info, we allow the shortcut back
+                    # so it can focus on "refining" rather than "remembering".
+                    enhanced_memory = memory + z_out
                 
                 # 4. Decode (Virtual Attempt)
                 # We feed the "enhanced memory" to the decoder
@@ -812,7 +835,7 @@ def train():
             
             # Forward Pass (PASS THE MASK!)
             # Ensure your model.forward() accepts and uses the mask as discussed!
-            step_results = model(input_ids, mask, labels=labels)
+            step_results = model(input_ids, mask, labels=labels, epoch=epoch)
             
             # --- LOSS CALCULATION ---
             
