@@ -590,6 +590,11 @@ class NeuroSymbolicACT(nn.Module):
                 # Mask ignored labels (-100)
                 mask = labels != -100
                 correct_tokens = (preds == labels) & mask
+                
+                num_valid = mask.sum(dim=-1).float()
+                num_correct = correct_tokens.sum(dim=-1).float()
+                partial_reward = num_correct / (num_valid + 1e-8) # Result is 0.0 to 1.
+                
                 # Sequence is correct if ALL tokens match
                 seq_correct = (correct_tokens.sum(dim=-1) == mask.sum(dim=-1))
                 is_correct = seq_correct.float() # 1.0 or 0.0
@@ -597,7 +602,8 @@ class NeuroSymbolicACT(nn.Module):
             step_outputs.append({
                 "q_logits": q_logits,
                 "lm_loss": lm_loss,
-                "is_correct": is_correct,
+                # "is_correct": is_correct,
+                "is_correct": partial_reward,
                 "z_final": final_vector
             })
             
@@ -751,9 +757,9 @@ def train():
             for res in step_results:
                 z_drift += (res['z_final'] - step_results[0]['z_final']).norm(p=2) # deviation from first thought
             drift_loss = z_drift / (len(step_results) * BATCH_SIZE)
-
+            drift_weight = 0.1
             # Total Loss
-            loss = lm_loss + (q_loss_weight * avg_q_loss) + (0.001 * drift_loss)
+            loss = lm_loss + (q_loss_weight * avg_q_loss) + (drift_weight * drift_loss)
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
