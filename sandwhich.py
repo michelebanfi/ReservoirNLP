@@ -21,152 +21,6 @@ HALT_EXPLORATION = 0.2 # Probability to force exploring more steps during traini
 
 print(f"Running ACT-HRM-Sandwich on {DEVICE}...")
 
-class TextLogicDataset(Dataset):
-    """
-    Generates bAbI-style object tracking stories.
-    Focus: Temporal Reasoning & State Updates.
-    """
-    def __init__(self, tokenizer, size=5000):
-        self.tokenizer = tokenizer
-        self.size = size
-        
-        self.people = ["Mary", "John", "Daniel", "Sandra", "Bill", "Lisa"]
-        self.locations = ["kitchen", "hallway", "garden", "office", "bedroom", "bathroom"]
-        self.actions = ["moved to", "went to", "journeyed to", "travelled to"]
-
-    def __len__(self):
-        return self.size
-
-    def __getitem__(self, idx):
-        # 1. Initialize State
-        story_len = random.randint(2, 6) # How many moves?
-        # Track where everyone is. Initially unknown.
-        current_locs = {} 
-        story_lines = []
-        
-        # 2. Generate Story
-        active_people = random.sample(self.people, 3) # Pick 3 actors
-        
-        for _ in range(story_len):
-            person = random.choice(active_people)
-            loc = random.choice(self.locations)
-            action = random.choice(self.actions)
-            
-            # Record the logic
-            current_locs[person] = loc
-            
-            # Generate Text
-            line = f"{person} {action} the {loc}."
-            story_lines.append(line)
-            
-        # 3. Generate Question
-        # Pick a person who actually moved
-        target_person = random.choice(list(current_locs.keys()))
-        target_loc = current_locs[target_person]
-        
-        question = f"Question: Where is {target_person}?"
-        
-        # Format Input: "Story: ... Question: ..."
-        input_text = "track state: " + " ".join(story_lines) + " " + question
-        target_text = target_loc
-
-        # 4. Tokenize
-        # NOTE: Use max_length=64 for labels to match SudokuDataset for batching compatibility
-        source = self.tokenizer(input_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
-        target = self.tokenizer(target_text, max_length=64, padding="max_length", truncation=True, return_tensors="pt")
-
-        return {
-            "input_ids": source.input_ids.squeeze(),
-            "attention_mask": source.attention_mask.squeeze(),
-            "labels": target.input_ids.squeeze()
-        }
-
-class SudokuDataset(Dataset):
-    """
-    Generates 4x4 Sudoku puzzles on the fly.
-    Input:  "solve sudoku: 1 0 4 3 | 0 0 2 1 | ..." (0 is empty)
-    Target: "1 2 4 3 | 3 4 2 1 | ..."
-    """
-    def __init__(self, tokenizer, size=5000):
-        self.tokenizer = tokenizer
-        self.size = size
-        
-        # A single valid 4x4 seed board
-        self.base_board = np.array([
-            [1, 2, 3, 4],
-            [3, 4, 1, 2],
-            [2, 1, 4, 3],
-            [4, 3, 2, 1]
-        ])
-
-    def __len__(self):
-        return self.size
-
-    def generate_puzzle(self):
-        # 1. Start with valid board
-        board = self.base_board.copy()
-        
-        # 2. Shuffle Digits (Relabel 1->4, 2->1, etc.)
-        # Logic adapted from your uploaded build_sudoku_dataset.py
-        mapping = np.random.permutation(np.arange(1, 5))
-        # Create a lookup table where index 0 is 0 (empty), and index 1..4 map to the shuffled values
-        mapper = np.zeros(5, dtype=int)
-        mapper[1:] = mapping
-        board = mapper[board]
-        
-        # 3. Shuffle Rows/Cols within Bands (2x2 blocks)
-        # 4x4 has 2 bands of 2 rows each
-        if random.random() < 0.5:
-            # Swap row 0 and 1
-            board[[0, 1]] = board[[1, 0]]
-        if random.random() < 0.5:
-            # Swap row 2 and 3
-            board[[2, 3]] = board[[3, 2]]
-            
-        # Swap the two large bands (rows 0-1 vs rows 2-3)
-        if random.random() < 0.5:
-            board[[0, 1, 2, 3]] = board[[2, 3, 0, 1]]
-            
-        # Same for columns
-        board = board.T
-        if random.random() < 0.5: board[[0, 1]] = board[[1, 0]]
-        if random.random() < 0.5: board[[2, 3]] = board[[3, 2]]
-        if random.random() < 0.5: board[[0, 1, 2, 3]] = board[[2, 3, 0, 1]]
-        board = board.T
-        
-        # 4. Create Mask (The Puzzle)
-        # Remove K random cells to make it a puzzle
-        solution = board.copy()
-        mask_count = random.randint(4, 8) # Remove 4 to 8 numbers
-        mask_indices = np.random.choice(16, mask_count, replace=False)
-        flat_board = board.flatten()
-        flat_board[mask_indices] = 0 # 0 represents empty
-        puzzle = flat_board.reshape(4, 4)
-        
-        return puzzle, solution
-
-    def __getitem__(self, idx):
-        puzzle, solution = self.generate_puzzle()
-        
-        # Format for T5: "1 0 4 3 | 0 2 ..."
-        # We use | to separate rows to help the model understand the grid structure
-        def to_str(grid):
-            rows = [" ".join(map(str, row)) for row in grid]
-            return " | ".join(rows)
-            
-        input_text = "solve sudoku: " + to_str(puzzle)
-        target_text = to_str(solution)
-
-        # NOTE: Use max_length=64 for labels (enough for 4x4 board, matches TextLogicDataset)
-        source = self.tokenizer(input_text, max_length=128, padding="max_length", truncation=True, return_tensors="pt")
-        target = self.tokenizer(target_text, max_length=64, padding="max_length", truncation=True, return_tensors="pt")
-
-        return {
-            "input_ids": source.input_ids.squeeze(),
-            "attention_mask": source.attention_mask.squeeze(),
-            "labels": target.input_ids.squeeze()
-        }
-
 class HeterogeneousDataset(Dataset):
     def __init__(self, tokenizer, size=10000):
         self.tokenizer = tokenizer
@@ -274,34 +128,8 @@ class HeterogeneousDataset(Dataset):
             "labels": target.input_ids.squeeze()
         }
 
-
-class MixedReasoningDataset(Dataset):
-    """
-    Combines TextLogicDataset and SudokuDataset for multi-task training.
-    Randomly samples from both datasets to train on diverse reasoning tasks.
-    """
-    def __init__(self, tokenizer, size=5000, text_logic_ratio=0.5):
-        self.tokenizer = tokenizer
-        self.size = size
-        self.text_logic_ratio = text_logic_ratio  # Probability of sampling TextLogic vs Sudoku
-        
-        # Initialize both sub-datasets
-        self.text_logic = TextLogicDataset(tokenizer, size=size)
-        self.sudoku = SudokuDataset(tokenizer, size=size)
-        
-    def __len__(self):
-        return self.size
-    
-    def __getitem__(self, idx):
-        # Randomly choose which dataset to sample from
-        if random.random() < self.text_logic_ratio:
-            return self.text_logic[idx]
-        else:
-            return self.sudoku[idx]
-
-# --- 1. DATASET (Same as before) ---
-class ComplexArithmeticDataset(Dataset):
-    def __init__(self, tokenizer, size=5000):
+class AdditionDataset(Dataset):
+    def __init__(self, tokenizer, size=10000):
         self.tokenizer = tokenizer
         self.size = size
 
@@ -309,36 +137,19 @@ class ComplexArithmeticDataset(Dataset):
         return self.size
 
     def __getitem__(self, idx):
-        # 33% Linear (Easy), 33% Geometric (Medium), 33% Fibonacci (Hard)
-        task_type = random.choice(['linear', 'geometric', 'fibonacci'])
+        # Generate two numbers
+        # Mixed difficulty: 2 digits to 5 digits
+        digits = random.randint(2, 5)
+        a = random.randint(10**(digits-1), 10**digits - 1)
+        b = random.randint(10**(digits-1), 10**digits - 1)
         
-        if task_type == 'linear':
-            # Sequence: x, x+d, x+2d ...
-            start = random.randint(1, 50)
-            step = random.randint(1, 10)
-            seq = [start + i*step for i in range(4)]
-            
-        elif task_type == 'geometric':
-            # Sequence: x, x*r, x*r^2 ...
-            start = random.randint(1, 5)
-            ratio = random.randint(2, 3) # Keep numbers small to fit T5 vocab
-            seq = [start * (ratio ** i) for i in range(4)]
-            
-        elif task_type == 'fibonacci':
-            # Sequence: a, b, a+b, a+2b+a ...
-            a = random.randint(1, 10)
-            b = random.randint(1, 10)
-            seq = [a, b]
-            for _ in range(2):
-                seq.append(seq[-1] + seq[-2])
-        
-        # Format Input
-        input_text = "predict next: " + " , ".join(map(str, seq[:-1]))
-        target_text = str(seq[-1])
+        # Input: "add: 123 + 456"
+        input_text = f"add: {a} + {b}"
+        target_text = str(a + b)
 
         # Tokenize
-        source = self.tokenizer(input_text, max_length=SEQ_LEN, padding="max_length", truncation=True, return_tensors="pt")
-        target = self.tokenizer(target_text, max_length=10, padding="max_length", truncation=True, return_tensors="pt")
+        source = self.tokenizer(input_text, max_length=32, padding="max_length", truncation=True, return_tensors="pt")
+        target = self.tokenizer(target_text, max_length=16, padding="max_length", truncation=True, return_tensors="pt")
 
         return {
             "input_ids": source.input_ids.squeeze(),
@@ -346,7 +157,6 @@ class ComplexArithmeticDataset(Dataset):
             "labels": target.input_ids.squeeze()
         }
 
-# --- 2. THE ACT-ENABLED CORE ---
 class RMSNorm(nn.Module):
     def __init__(self, dim, eps=1e-6):
         super().__init__()
@@ -444,7 +254,6 @@ class ACTReasoningCore(nn.Module):
         # Predict Q-values from the first token's state (representing the whole thought)
         # z_state: [Batch, Seq, Dim] -> we take [Batch, 0, Dim]
         return self.q_head(z_state[:, 0, :])
-
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=512):
@@ -647,142 +456,13 @@ class NanoACT(nn.Module):
                 
         return self.tokenizer.decode(curr_tokens[0], skip_special_tokens=True) + f" (Steps: {final_step})"
 
-# --- 3. THE ACT SANDWICH ---
-class NeuroSymbolicACT(nn.Module):
-    def __init__(self, base_model_name):
-        super().__init__()
-        self.t5 = T5ForConditionalGeneration.from_pretrained(base_model_name)
-        self.tokenizer = T5Tokenizer.from_pretrained(base_model_name)
-        
-        for param in self.t5.parameters():
-            param.requires_grad = False
-            
-        hidden_dim = self.t5.config.d_model
-        self.hrm = ACTReasoningCore(hidden_dim, num_heads=8)
-        
-    def forward(self, input_ids, attention_mask, labels=None):
-        B = input_ids.shape[0]
-        
-        with torch.no_grad():
-            # enc_out = self.t5.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
-            enc_out = self.t5.shared(input_ids)
-            
-        original_inputs = enc_out
-        x = self.hrm.input_adapter(enc_out)
-        z = self.hrm.state_init.expand(B, x.shape[1], x.shape[2])
-        x = x + self.hrm.pos_embed[:, :x.shape[1], :]
-        
-        step_outputs = []
-        steps_to_run = MAX_ACT_STEPS
-        
-        for step in range(steps_to_run):
-            # PASS THE MASK HERE
-            z = self.hrm.forward_step(z, x, mask=attention_mask)
-            
-            # B. Check Halting (Q-Values)
-            q_logits = self.hrm.predict_q(z) # [Batch, 2]
-            
-            # C. Generate Output Candidate
-            z_out = self.hrm.output_adapter(z)
-            final_vector = original_inputs + z_out
-            
-            # D. If Training, check correctness immediately using T5 Decoder
-            lm_loss = None
-            is_correct = None
-            
-            if labels is not None:
-                # We perform a "Virtual Decode" to see if this thought is correct
-                # This uses the Frozen Decoder to get the CrossEntropy Loss
-                decoder_out = self.t5(
-                    encoder_outputs=(final_vector,),
-                    labels=labels,
-                    decoder_input_ids=self.t5._shift_right(labels)
-                )
-                lm_loss = decoder_out.loss
-                
-                # Check correctness (Exact Match on Argmax)
-                # This is the "Reward" for the Q-Head
-                logits = decoder_out.logits # [B, Seq, Vocab]
-                preds = logits.argmax(dim=-1)
-                
-                # Mask ignored labels (-100)
-                mask = labels != -100
-                correct_tokens = (preds == labels) & mask
-                
-                num_valid = mask.sum(dim=-1).float()
-                num_correct = correct_tokens.sum(dim=-1).float()
-                partial_reward = num_correct / (num_valid + 1e-8) # Result is 0.0 to 1.
-                
-                # Sequence is correct if ALL tokens match
-                seq_correct = (correct_tokens.sum(dim=-1) == mask.sum(dim=-1))
-                is_correct = seq_correct.float() # 1.0 or 0.0
-
-            step_outputs.append({
-                "q_logits": q_logits,
-                "lm_loss": lm_loss,
-                # "is_correct": is_correct,
-                "is_correct": partial_reward,
-                "z_final": final_vector
-            })
-            
-            # E. Inference Halting Logic
-            if labels is None:
-                halt_score = q_logits[:, 0]
-                cont_score = q_logits[:, 1]
-                if (halt_score > cont_score).all(): # Simple: Halt if batch agrees (or handle batching properly)
-                    break 
-
-        return step_outputs
-
-    def generate(self, input_text):
-        inputs = self.tokenizer(input_text, return_tensors="pt").to(DEVICE)
-        
-        with torch.no_grad():
-            # 1. Encode
-            enc_out = self.t5.encoder(inputs.input_ids).last_hidden_state
-            
-            # 2. ACT Loop
-            original_inputs = enc_out
-            x = self.hrm.input_adapter(enc_out)
-            z = self.hrm.state_init.expand(1, x.shape[1], x.shape[2])
-            x = x + self.hrm.pos_embed[:, :x.shape[1], :]
-            
-            # Use the MASK (Fixed logic)
-            mask = inputs.attention_mask
-            
-            final_step = 0
-            for step in range(MAX_ACT_STEPS):
-                z = self.hrm.forward_step(z, x, mask=mask)
-                q_logits = self.hrm.predict_q(z)
-                
-                halt = q_logits[0, 0]
-                cont = q_logits[0, 1]
-                
-                if halt > cont:
-                    final_step = step + 1
-                    break
-                final_step = step + 1
-            
-            # 3. Decode
-            z_out = self.hrm.output_adapter(z)
-            final_vec = original_inputs + z_out
-            
-            from transformers.modeling_outputs import BaseModelOutput
-            dummy = BaseModelOutput(last_hidden_state=final_vec)
-            
-            # FIX: Increase max_length to 64 to see the whole board
-            gen = self.t5.generate(encoder_outputs=dummy, max_length=64)
-            
-        return self.tokenizer.decode(gen[0], skip_special_tokens=True) + f" (Steps: {final_step})"
-
-# --- 4. TRAINING WITH Q-LOSS ---
 def train():
     # 1. SETUP
     tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME)
     model = NanoACT(tokenizer).to(DEVICE)
     
     # Use the new MixedReasoningDataset (50% TextLogic, 50% Sudoku)
-    dataset = HeterogeneousDataset(tokenizer, size=5000)
+    dataset = AdditionDataset(tokenizer, size=5000)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate LRs for Stability
@@ -797,24 +477,24 @@ def train():
     
     # 2. TEST CASES FOR BOTH TASKS
     # TextLogic tests
-    test_text = "track state: Mary went to the hallway. Mary moved to the office. Question: Where is Mary?"
-    hard_text = "track state: John went to the garden. Mary moved to the kitchen. John moved to the office. Question: Where is John?"
+    # test_text = "track state: Mary went to the hallway. Mary moved to the office. Question: Where is Mary?"
+    # hard_text = "track state: John went to the garden. Mary moved to the kitchen. John moved to the office. Question: Where is John?"
     
-    # Sudoku test (simple puzzle with one missing number - top-left should be 1)
-    test_sudoku = "solve sudoku: 0 2 3 4 | 3 4 1 2 | 2 1 4 3 | 4 3 2 1"
+    # # Sudoku test (simple puzzle with one missing number - top-left should be 1)
+    # test_sudoku = "solve sudoku: 0 2 3 4 | 3 4 1 2 | 2 1 4 3 | 4 3 2 1"
     
-    print(f"\n--- TEST CASES ---")
-    print(f"EASY TextLogic: {test_text}")
-    print(f"HARD TextLogic: {hard_text}")
-    print(f"SUDOKU: {test_sudoku}")
-    print("-" * 50)
+    # print(f"\n--- TEST CASES ---")
+    # print(f"EASY TextLogic: {test_text}")
+    # print(f"HARD TextLogic: {hard_text}")
+    # print(f"SUDOKU: {test_sudoku}")
+    # print("-" * 50)
     
-    # Print initial (untrained) outputs
-    print(f"\\n--- INITIAL (UNTRAINED) OUTPUTS ---")
-    print(f"EASY TextLogic: {model.generate(test_text)}")
-    print(f"HARD TextLogic: {model.generate(hard_text)}")
-    print(f"SUDOKU: {model.generate(test_sudoku)}")
-    print("-" * 50)
+    # # Print initial (untrained) outputs
+    # print(f"\\n--- INITIAL (UNTRAINED) OUTPUTS ---")
+    # print(f"EASY TextLogic: {model.generate(test_text)}")
+    # print(f"HARD TextLogic: {model.generate(hard_text)}")
+    # print(f"SUDOKU: {model.generate(test_sudoku)}")
+    # print("-" * 50)
     
     for epoch in range(EPOCHS):
         # 3. WARMUP LOGIC
@@ -941,11 +621,14 @@ def train():
             return model.tokenizer.decode(curr_tokens[0], skip_special_tokens=True)
 
         # Test the hypothesis
-        bad_sudoku = "solve sudoku: 2 0 4 3 | 0 0 2 1 | 0 1 0 0 | 4 3 0 0" 
-        print("1 Step (Lazy):", debug_inference(model, bad_sudoku, force_steps=1))
-        print("8 Steps (Forced):", debug_inference(model, bad_sudoku, force_steps=8))
-
+        # bad_sudoku = "solve sudoku: 2 0 4 3 | 0 0 2 1 | 0 1 0 0 | 4 3 0 0" 
+        # print("1 Step (Lazy):", debug_inference(model, bad_sudoku, force_steps=1))
+        # print("8 Steps (Forced):", debug_inference(model, bad_sudoku, force_steps=8))
         
+        test = "add 48 + 53"
+        print("Test Addition (1 Step):", debug_inference(model, test, force_steps=1))
+        print("Test Addition (8 Steps):", debug_inference(model, test, force_steps=8))
+
 
 if __name__ == "__main__":
     train()
