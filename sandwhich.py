@@ -11,7 +11,7 @@ import numpy as np
 MODEL_NAME = "t5-small"
 BATCH_SIZE = 16 # Reduced batch size as we run decoder multiple times
 LEARNING_RATE = 3e-4
-EPOCHS = 10
+EPOCHS = 15
 SEQ_LEN = 128
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -129,23 +129,59 @@ class HeterogeneousDataset(Dataset):
         }
 
 class AdditionDataset(Dataset):
-    def __init__(self, tokenizer, size=10000):
+    """
+    Addition dataset with curriculum learning and digit-spaced format.
+    - Spaces digits for consistent tokenization: "1 2 3" not "123"
+    - Reverses output for easier carry propagation learning
+    - Curriculum: starts with 1-2 digit numbers, gradually increases
+    """
+    def __init__(self, tokenizer, size=10000, max_digits=3, epoch=0):
         self.tokenizer = tokenizer
         self.size = size
+        self.max_digits = max_digits
+        self.epoch = epoch
+
+    def set_epoch(self, epoch):
+        """Update epoch for curriculum learning"""
+        self.epoch = epoch
 
     def __len__(self):
         return self.size
 
+    def _space_digits(self, num):
+        """Convert 123 -> '1 2 3' for consistent tokenization"""
+        return ' '.join(str(num))
+    
+    def _reverse_digits(self, num):
+        """Reverse for easier carry learning: 123 -> '3 2 1'"""
+        return ' '.join(reversed(str(num)))
+
     def __getitem__(self, idx):
-        # Generate two numbers
-        # Mixed difficulty: 2 digits to 5 digits
-        digits = random.randint(2, 5)
-        a = random.randint(10**(digits-1), 10**digits - 1)
-        b = random.randint(10**(digits-1), 10**digits - 1)
+        # Curriculum learning: start easy, get harder
+        # Epoch 0-2: 1-2 digits, Epoch 3-5: 1-3 digits, Epoch 6+: 1-max_digits
+        if self.epoch < 3:
+            max_d = 2
+        elif self.epoch < 6:
+            max_d = min(3, self.max_digits)
+        else:
+            max_d = self.max_digits
         
-        # Input: "add: 123 + 456"
-        input_text = f"add: {a} + {b}"
-        target_text = str(a + b)
+        digits = random.randint(1, max_d)
+        
+        # Generate numbers
+        if digits == 1:
+            a = random.randint(1, 9)
+            b = random.randint(1, 9)
+        else:
+            a = random.randint(10**(digits-1), 10**digits - 1)
+            b = random.randint(10**(digits-1), 10**digits - 1)
+        
+        result = a + b
+        
+        # Format: "add: 4 8 + 5 3" -> "1 0 1" (or reversed: "1 0 1")
+        input_text = f"add: {self._space_digits(a)} + {self._space_digits(b)}"
+        # Regular order (not reversed) - reversed can be tried if this doesn't work
+        target_text = self._space_digits(result)
 
         # Tokenize
         source = self.tokenizer(input_text, max_length=32, padding="max_length", truncation=True, return_tensors="pt")
@@ -485,8 +521,8 @@ def train():
     tokenizer = T5Tokenizer.from_pretrained(MODEL_NAME, legacy=True)
     model = NanoACT(tokenizer).to(DEVICE)
     
-    # Use the new MixedReasoningDataset (50% TextLogic, 50% Sudoku)
-    dataset = AdditionDataset(tokenizer, size=5000)
+    # Use AdditionDataset with curriculum learning
+    dataset = AdditionDataset(tokenizer, size=8000, max_digits=3, epoch=0)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate LRs for Stability
@@ -521,6 +557,9 @@ def train():
     # print("-" * 50)
     
     for epoch in range(EPOCHS):
+        # Update curriculum
+        dataset.set_epoch(epoch)
+        
         # 3. WARMUP LOGIC
         # First 5 epochs: Force 6 steps of thinking, Ignore Q-Loss.
         # This helps the HRM learn "how to think" before "when to stop".
@@ -654,14 +693,15 @@ def train():
                     
             return model.tokenizer.decode(curr_tokens[0], skip_special_tokens=True)
 
-        # Test the hypothesis
-        # bad_sudoku = "solve sudoku: 2 0 4 3 | 0 0 2 1 | 0 1 0 0 | 4 3 0 0" 
-        # print("1 Step (Lazy):", debug_inference(model, bad_sudoku, force_steps=1))
-        # print("8 Steps (Forced):", debug_inference(model, bad_sudoku, force_steps=8))
+        # Test with spaced digit format (matching training data)
+        test_easy = "add: 4 + 5"  # = 9
+        test_med = "add: 4 8 + 5 3"  # = 101 -> "1 0 1"
+        test_hard = "add: 1 2 3 + 4 5 6"  # = 579 -> "5 7 9"
         
-        test = "add: 48 + 53"  # Fixed: added colon to match dataset format
-        print("Test Addition (1 Step):", debug_inference(model, test, force_steps=1))
-        print("Test Addition (8 Steps):", debug_inference(model, test, force_steps=8))
+        print(f"  Easy (4+5=9):   1-step: {debug_inference(model, test_easy, 1)} | 8-step: {debug_inference(model, test_easy, 8)}")
+        print(f"  Med (48+53=101): 1-step: {debug_inference(model, test_med, 1)} | 8-step: {debug_inference(model, test_med, 8)}")
+        if epoch >= 5:  # Only test hard after curriculum progresses
+            print(f"  Hard (123+456=579): 1-step: {debug_inference(model, test_hard, 1)} | 8-step: {debug_inference(model, test_hard, 8)}")
 
 
 if __name__ == "__main__":
