@@ -167,6 +167,101 @@ class SudokuDataset(Dataset):
             "labels": target.input_ids.squeeze()
         }
 
+class HeterogeneousDataset(Dataset):
+    def __init__(self, tokenizer, size=10000):
+        self.tokenizer = tokenizer
+        self.size = size
+        self.tasks = ['arithmetic', 'sort', 'reverse', 'logic']
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        # Randomly select a task type to force the model to adapt
+        task = random.choice(self.tasks)
+        
+        if task == 'arithmetic':
+            return self.gen_arithmetic()
+        elif task == 'sort':
+            return self.gen_sort()
+        elif task == 'reverse':
+            return self.gen_reverse()
+        elif task == 'logic':
+            return self.gen_logic()
+
+    # --- TASK 1: Sequential Arithmetic ---
+    # Forces the model to hold a value in memory
+    def gen_arithmetic(self):
+        ops = ['+', '-', '*']
+        a = random.randint(1, 10)
+        b = random.randint(1, 10)
+        c = random.randint(1, 5)
+        
+        op1 = random.choice(ops)
+        op2 = random.choice(ops)
+        
+        # Example: (3 + 5) * 2
+        input_text = f"calc: ({a} {op1} {b}) {op2} {c}"
+        
+        # Python eval handles the logic (Ground Truth)
+        try:
+            res = eval(f"({a} {op1} {b}) {op2} {c}")
+        except:
+            res = 0
+            
+        target_text = str(res)
+        return self.format(input_text, target_text)
+
+    # --- TASK 2: List Sorting ---
+    # Forces global comparison logic
+    def gen_sort(self):
+        length = random.randint(3, 6)
+        nums = [random.randint(0, 99) for _ in range(length)]
+        input_text = "sort: " + " ".join(map(str, nums))
+        
+        sorted_nums = sorted(nums)
+        target_text = " ".join(map(str, sorted_nums))
+        return self.format(input_text, target_text)
+
+    # --- TASK 3: Reversal ---
+    # Forces positional understanding
+    def gen_reverse(self):
+        length = random.randint(4, 8)
+        # Use random letters
+        chars = [chr(random.randint(97, 122)) for _ in range(length)]
+        input_text = "reverse: " + " ".join(chars)
+        
+        target_text = " ".join(chars[::-1])
+        return self.format(input_text, target_text)
+
+    # --- TASK 4: Logic (Your Existing Logic) ---
+    def gen_logic(self):
+        people = ["Mary", "John", "Daniel", "Sandra"]
+        locs = ["kitchen", "garden", "office", "bedroom"]
+        
+        # Simple 2-step story
+        p = random.choice(people)
+        l1 = random.choice(locs)
+        l2 = random.choice(locs)
+        
+        story = f"{p} went to {l1}. {p} moved to {l2}."
+        question = f"Where is {p}?"
+        
+        input_text = f"track: {story} {question}"
+        target_text = l2
+        return self.format(input_text, target_text)
+
+    def format(self, input_text, target_text):
+        source = self.tokenizer(input_text, max_length=64, padding="max_length", truncation=True, return_tensors="pt")
+        target = self.tokenizer(target_text, max_length=16, padding="max_length", truncation=True, return_tensors="pt")
+        
+        return {
+            "input_ids": source.input_ids.squeeze(),
+            "attention_mask": source.attention_mask.squeeze(), # 1=Valid
+            "labels": target.input_ids.squeeze()
+        }
+
+
 class MixedReasoningDataset(Dataset):
     """
     Combines TextLogicDataset and SudokuDataset for multi-task training.
@@ -664,7 +759,7 @@ def train():
     model = NanoACT(tokenizer).to(DEVICE)
     
     # Use the new MixedReasoningDataset (50% TextLogic, 50% Sudoku)
-    dataset = MixedReasoningDataset(tokenizer, size=5000, text_logic_ratio=0.5)
+    dataset = HeterogeneousDataset(tokenizer, size=5000)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
     # Separate LRs for Stability
