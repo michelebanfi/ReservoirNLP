@@ -5,3 +5,6 @@ tokenizers
 matplotlib
 transformers
 datasets
+tqdm
+psutil
+sentencepiece  # For T5/Flan-T5 tokenizer
