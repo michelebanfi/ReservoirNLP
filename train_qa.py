@@ -1,12 +1,3 @@
-"""
-ACT-HRM-Sandwich Model Training on DROP and SQuAD Datasets
-==========================================================
-A larger model with proper train/val/test splits, metrics logging,
-and validation output during training.
-
-Designed for server training with comprehensive monitoring.
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,24 +14,18 @@ from tqdm import tqdm
 import psutil
 import gc
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
 class Config:
-    # Model Architecture (Larger)
-    D_MODEL = 512           # Hidden dimension (was 256)
-    N_HEADS = 8             # Attention heads (was 4)
-    N_ENCODER_LAYERS = 4    # Encoder depth (was 2)
-    N_DECODER_LAYERS = 4    # Decoder depth (was 2)
-    N_HRM_BLOCKS = 2        # HRM reasoning blocks
+    D_MODEL = 512
+    N_HEADS = 8
+    N_ENCODER_LAYERS = 4
+    N_DECODER_LAYERS = 4
+    N_HRM_BLOCKS = 2
     DROPOUT = 0.1
     
-    # ACT Configuration
+
     MAX_ACT_STEPS = 8
     HALT_EXPLORATION = 0.2
     
-    # Training
     BATCH_SIZE = 16
     LEARNING_RATE = 1e-4
     WEIGHT_DECAY = 0.01
@@ -48,7 +33,6 @@ class Config:
     WARMUP_STEPS = 1000
     GRADIENT_CLIP = 1.0
     
-    # Data
     MAX_SRC_LEN = 512       # Context + Question
     MAX_TGT_LEN = 64        # Answer
     TRAIN_SIZE = None       # None = use all
@@ -56,15 +40,11 @@ class Config:
     TEST_SIZE = 1000        # Test subset
     NUM_VAL_SAMPLES = 5     # Samples to print each epoch
     
-    # Tokenizer - Using T5 (subword, handles OOV well)
-    # Alternative: "google/flan-t5-base" or "facebook/bart-base"
-    TOKENIZER_NAME = "google/flan-t5-base"  # Better than legacy T5
+    TOKENIZER_NAME = "google/flan-t5-base"  
     
-    # Paths
     RESULTS_DIR = "results"
     MODEL_SAVE_PATH = "models/act_qa_model.pt"
     
-    # Device
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
     @classmethod
@@ -72,9 +52,6 @@ class Config:
         return {k: v for k, v in vars(cls).items() 
                 if not k.startswith('_') and k.isupper()}
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
 
 def get_memory_usage():
     """Get current GPU and CPU memory usage"""
@@ -105,9 +82,6 @@ def load_metrics(filepath):
             return json.load(f)
     return {}
 
-# ============================================================================
-# DATASETS
-# ============================================================================
 
 class DROPDataset(Dataset):
     """DROP Dataset - Discrete Reasoning Over Paragraphs"""
@@ -169,7 +143,6 @@ class DROPDataset(Dataset):
             'raw_answer': answer
         }
 
-
 class SQuADDataset(Dataset):
     """SQuAD Dataset - Reading Comprehension"""
     
@@ -227,17 +200,14 @@ class SQuADDataset(Dataset):
             'raw_answer': answer
         }
 
-
 class CombinedQADataset(Dataset):
     """Combined DROP + SQuAD dataset"""
     
     def __init__(self, tokenizer, split='train', max_samples=None):
         self.tokenizer = tokenizer
         
-        # Determine samples per dataset
         samples_per_ds = max_samples // 2 if max_samples else None
         
-        # Load both datasets
         drop_split = 'train' if split == 'train' else 'validation'
         squad_split = 'train' if split == 'train' else 'validation'
         
@@ -254,11 +224,6 @@ class CombinedQADataset(Dataset):
             return self.drop_data[idx]
         return self.squad_data[idx - len(self.drop_data)]
 
-
-# ============================================================================
-# MODEL COMPONENTS
-# ============================================================================
-
 class RMSNorm(nn.Module):
     def __init__(self, dim, eps=1e-6):
         super().__init__()
@@ -269,7 +234,6 @@ class RMSNorm(nn.Module):
         var = torch.mean(x ** 2, dim=-1, keepdim=True)
         return x * torch.rsqrt(var + self.eps) * self.weight
 
-
 class SwiGLU(nn.Module):
     def __init__(self, dim, hidden_dim):
         super().__init__()
@@ -279,7 +243,6 @@ class SwiGLU(nn.Module):
     
     def forward(self, x):
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
-
 
 class HRMBlock(nn.Module):
     """Heterogeneous Reasoning Module Block"""
@@ -305,7 +268,6 @@ class HRMBlock(nn.Module):
         x = x + self.dropout(self.mlp(self.norm2(x)))
         return x
 
-
 class IterativeRefinementAdapter(nn.Module):
     """Gated adapter for iterative refinement"""
     
@@ -326,7 +288,6 @@ class IterativeRefinementAdapter(nn.Module):
         gate = torch.sigmoid(self.gate_proj(gate_input))
         
         return self.norm(gate * x_proj + (1 - gate) * x)
-
 
 class ACTReasoningCore(nn.Module):
     """Adaptive Computation Time Reasoning Core"""
@@ -378,7 +339,6 @@ class ACTReasoningCore(nn.Module):
     def predict_q(self, z_state):
         return self.q_head(z_state[:, 0, :])
 
-
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=1024, dropout=0.1):
         super().__init__()
@@ -393,7 +353,6 @@ class PositionalEncoding(nn.Module):
     
     def forward(self, x):
         return self.dropout(x + self.pe[:x.size(1), :].unsqueeze(0))
-
 
 class NanoACTLarge(nn.Module):
     """Larger ACT model for QA tasks"""
@@ -601,11 +560,6 @@ class NanoACTLarge(nn.Module):
         generated_text = self.tokenizer.decode(curr_tokens[0], skip_special_tokens=True)
         return generated_text, final_step
 
-
-# ============================================================================
-# TRAINING FUNCTIONS
-# ============================================================================
-
 def evaluate(model, dataloader, device, num_samples=5):
     """Evaluate model and optionally print samples"""
     model.eval()
@@ -645,43 +599,36 @@ def evaluate(model, dataloader, device, num_samples=5):
     model.train()
     return avg_loss, accuracy, samples
 
-
 def train(config=Config):
     """Main training loop"""
     
-    # Setup
     print("=" * 60)
     print("ACT-HRM-Sandwich Training on DROP + SQuAD")
     print("=" * 60)
     print(f"Device: {config.DEVICE}")
     print(f"Config: {config.to_dict()}")
     
-    # Results directory
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(config.MODEL_SAVE_PATH), exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # Tokenizer
-    print("\n📚 Loading tokenizer...")
+    print("\n Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(config.TOKENIZER_NAME)
     print(f"   Tokenizer: {config.TOKENIZER_NAME}")
     print(f"   Vocab size: {tokenizer.vocab_size}")
     
-    # Model
-    print("\n🧠 Building model...")
+    print("\n Building model...")
     model = NanoACTLarge(tokenizer, config).to(config.DEVICE)
     params = count_parameters(model)
     print(f"   Total parameters: {params['total']:,}")
     print(f"   Trainable parameters: {params['trainable']:,}")
     print(f"   Model size: {params['total'] * 4 / 1e9:.2f} GB (fp32)")
     
-    # Data
-    print("\n📊 Loading datasets...")
+    print("\n Loading datasets...")
     train_dataset = CombinedQADataset(tokenizer, 'train', config.TRAIN_SIZE)
     val_dataset = CombinedQADataset(tokenizer, 'validation', config.VAL_SIZE)
     
-    # For test, use part of validation (as SQuAD doesn't have test labels)
     test_dataset = CombinedQADataset(tokenizer, 'validation', config.TEST_SIZE)
     
     print(f"   Train samples: {len(train_dataset)}")
@@ -708,14 +655,12 @@ def train(config=Config):
         num_workers=2
     )
     
-    # Optimizer
     optimizer = torch.optim.AdamW([
         {'params': model.hrm.q_head.parameters(), 'lr': 5e-4},
         {'params': [p for n, p in model.hrm.named_parameters() if 'q_head' not in n], 'lr': config.LEARNING_RATE},
         {'params': [p for n, p in model.named_parameters() if 'hrm' not in n], 'lr': config.LEARNING_RATE}
     ], weight_decay=config.WEIGHT_DECAY)
     
-    # Scheduler
     total_steps = len(train_loader) * config.EPOCHS
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -724,7 +669,6 @@ def train(config=Config):
         pct_start=0.1
     )
     
-    # Metrics storage
     all_metrics = {
         'config': config.to_dict(),
         'params': params,
@@ -735,8 +679,7 @@ def train(config=Config):
     
     best_val_loss = float('inf')
     
-    # Training loop
-    print("\n🚀 Starting training...")
+    print("\n Starting training...")
     print("-" * 60)
     
     for epoch in range(config.EPOCHS):
@@ -752,7 +695,6 @@ def train(config=Config):
             'memory': {}
         }
         
-        # Progress bar
         pbar = tqdm(
             train_loader, 
             desc=f"Epoch {epoch+1}/{config.EPOCHS}",
@@ -771,11 +713,9 @@ def train(config=Config):
             if not step_results:
                 continue
             
-            # Losses
             final_step = step_results[-1]
             lm_loss = final_step['lm_loss']
             
-            # Q-Learning loss
             q_losses = []
             if not is_warmup:
                 next_value = step_results[-1]['is_correct']
@@ -802,13 +742,11 @@ def train(config=Config):
             
             avg_q_loss = torch.stack(q_losses).mean() if q_losses else torch.tensor(0.0).to(config.DEVICE)
             
-            # Thought drift
             z_drift = sum(
                 (res['z_final'] - step_results[0]['z_final']).norm(p=2) 
                 for res in step_results
             )
             
-            # Total loss
             loss = lm_loss + (q_loss_weight * avg_q_loss)
             loss.backward()
             
@@ -816,12 +754,10 @@ def train(config=Config):
             optimizer.step()
             scheduler.step()
             
-            # Update metrics
             epoch_metrics['lm_loss'] += lm_loss.item()
             epoch_metrics['q_loss'] += avg_q_loss.item()
             epoch_metrics['thought_drift'] += z_drift.item() / (len(step_results) * config.BATCH_SIZE)
             
-            # Update progress bar
             mem = get_memory_usage()
             pbar.set_postfix({
                 'LM': f"{lm_loss.item():.4f}",
@@ -830,7 +766,6 @@ def train(config=Config):
                 'GPU': f"{mem.get('gpu_allocated_gb', 0):.1f}GB"
             })
         
-        # Average epoch metrics
         num_batches = len(train_loader)
         epoch_metrics['lm_loss'] /= num_batches
         epoch_metrics['q_loss'] /= num_batches
@@ -839,8 +774,7 @@ def train(config=Config):
         
         all_metrics['train'].append(epoch_metrics)
         
-        # Validation
-        print(f"\n📊 Validation Epoch {epoch+1}:")
+        print(f"\n Validation Epoch {epoch+1}:")
         val_loss, val_acc, val_samples = evaluate(
             model, val_loader, config.DEVICE, num_samples=config.NUM_VAL_SAMPLES
         )
@@ -862,7 +796,6 @@ def train(config=Config):
             print(f"       Predicted: {sample['predicted'][:50]}")
             print()
         
-        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save({
@@ -872,17 +805,14 @@ def train(config=Config):
                 'val_loss': val_loss,
                 'config': config.to_dict()
             }, config.MODEL_SAVE_PATH)
-            print(f"   ✅ Saved best model (val_loss: {val_loss:.4f})")
+            print(f"Saved best model (val_loss: {val_loss:.4f})")
         
-        # Save metrics after each epoch
         save_metrics(all_metrics, f"{config.RESULTS_DIR}/metrics_{timestamp}.json")
         print("-" * 60)
     
-    # Final Test Evaluation
-    print("\n🧪 Final Test Evaluation:")
+    print("\n Final Test Evaluation:")
     print("=" * 60)
     
-    # Load best model
     checkpoint = torch.load(config.MODEL_SAVE_PATH)
     model.load_state_dict(checkpoint['model_state_dict'])
     
@@ -906,24 +836,16 @@ def train(config=Config):
         print(f"    Predicted: {sample['predicted']}")
         print()
     
-    # Save final metrics
     save_metrics(all_metrics, f"{config.RESULTS_DIR}/metrics_{timestamp}.json")
     save_metrics(all_metrics, f"{config.RESULTS_DIR}/metrics_latest.json")
     
-    print(f"\n✅ Training complete!")
+    print(f"\n Training complete!")
     print(f"   Results saved to: {config.RESULTS_DIR}/metrics_{timestamp}.json")
     print(f"   Model saved to: {config.MODEL_SAVE_PATH}")
     
     return model, all_metrics
 
 
-# ============================================================================
-# MAIN
-# ============================================================================
-
 if __name__ == "__main__":
-    # You can override config here if needed
-    # Config.EPOCHS = 5
-    # Config.BATCH_SIZE = 8
-    
+
     model, metrics = train()
