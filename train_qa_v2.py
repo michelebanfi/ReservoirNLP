@@ -58,7 +58,14 @@ class ConfigV2:
 
     @classmethod
     def to_dict(cls):
-        return {k: v for k, v in vars(cls).items() if not k.startswith('_') and not callable(v)}
+        result = {}
+        for k, v in vars(cls).items():
+            if k.startswith('_'):
+                continue
+            if callable(v) or isinstance(v, classmethod):
+                continue
+            result[k] = v
+        return result
 
 
 def get_memory_usage():
@@ -621,6 +628,15 @@ def evaluate(model, dataloader, device, num_samples=5):
             if len(samples) < num_samples:
                 for i in range(min(num_samples - len(samples), len(input_ids))):
                     pred_ids = result['logits'][i].argmax(dim=-1)
+                    # Truncate at first EOS or PAD token
+                    eos_id = model.tokenizer.eos_token_id
+                    pad_id = model.tokenizer.pad_token_id
+                    truncate_idx = len(pred_ids)
+                    for j, tok in enumerate(pred_ids):
+                        if tok.item() in (eos_id, pad_id, 0):
+                            truncate_idx = j
+                            break
+                    pred_ids = pred_ids[:truncate_idx]
                     pred_text = model.tokenizer.decode(pred_ids, skip_special_tokens=True)
                     samples.append({
                         'question': batch['raw_question'][i],
