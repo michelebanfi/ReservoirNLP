@@ -35,7 +35,7 @@ class ConfigV2:
     PONDER_COST = 0.01  # Small cost per step to encourage efficiency
     TIME_PENALTY = 0.001  # Penalty for using too many steps
     
-    BATCH_SIZE = 16
+    BATCH_SIZE = 32
     LEARNING_RATE = 3e-4  # Slightly higher
     WEIGHT_DECAY = 0.01
     EPOCHS = 30  # More epochs
