@@ -28,19 +28,22 @@ class ConfigV2:
     N_HEADS = 8
     N_ENCODER_LAYERS = 4
     N_DECODER_LAYERS = 4
-    N_HRM_BLOCKS = 3  # Slightly more reasoning blocks
+    N_HRM_BLOCKS = 3  # Reasoning blocks per level
     DROPOUT = 0.1
     
+    # HRM-style ACT parameters
     MAX_ACT_STEPS = 8
-    PONDER_COST = 0.01  # Small cost per step to encourage efficiency
-    TIME_PENALTY = 0.001  # Penalty for using too many steps
+    HALT_EXPLORATION_PROB = 0.1  # Random exploration to prevent halting collapse
+    Q_LOSS_WEIGHT = 0.5  # Weight for Q-learning losses
     
+    # Training hyperparameters (from HRM repo)
     BATCH_SIZE = 32
-    LEARNING_RATE = 3e-4  # Slightly higher
-    WEIGHT_DECAY = 0.01
-    EPOCHS = 30  # More epochs
-    WARMUP_STEPS = 500
+    LEARNING_RATE = 1e-4  # Lower LR for stability
+    WEIGHT_DECAY = 1.0  # High weight decay for small-sample learning
+    EPOCHS = 30
+    WARMUP_STEPS = 2000  # Longer warmup
     GRADIENT_CLIP = 1.0
+    LABEL_SMOOTHING = 0.1  # Help with degenerate outputs
     
     MAX_SRC_LEN = 512
     MAX_TGT_LEN = 64
@@ -270,8 +273,13 @@ class HRMBlock(nn.Module):
 
 class ACTReasoningCoreV2(nn.Module):
     """
-    Improved ACT Reasoning Core with proper halting mechanism
-    Based on Graves 2016 "Adaptive Computation Time"
+    HRM-style Reasoning Core with Q-learning halting
+    Based on sapientinc/HRM architecture
+    
+    Uses two Q-values:
+    - q_halt: value of halting now
+    - q_continue: value of continuing computation
+    Halts when q_halt > q_continue
     """
     
     def __init__(self, dim, num_heads, n_blocks=3, dropout=0.1, max_steps=8):
@@ -279,17 +287,15 @@ class ACTReasoningCoreV2(nn.Module):
         self.dim = dim
         self.max_steps = max_steps
         
-        # Halting unit - outputs single probability
-        # Initialize with slight bias toward continuing (not halting)
-        self.halt_unit = nn.Sequential(
-            nn.Linear(dim, dim // 2),
-            nn.ReLU(),
-            nn.Linear(dim // 2, 1),
-            nn.Sigmoid()
-        )
-        # Initialize to output ~0.3 initially (continue more often)
+        # Q-head outputs 2 logits: [q_halt, q_continue]
+        # HRM uses a simple linear projection from the first token
+        self.q_head = nn.Linear(dim, 2, bias=True)
+        
+        # Critical: Initialize Q-head to strongly favor continuing
+        # This prevents early halting collapse (from HRM repo)
         with torch.no_grad():
-            self.halt_unit[-2].bias.fill_(-0.5)
+            self.q_head.weight.zero_()
+            self.q_head.bias.fill_(-5)  # Strong bias toward low values initially
         
         # Step embedding
         self.step_embed = nn.Embedding(max_steps + 1, dim)
@@ -333,9 +339,15 @@ class ACTReasoningCoreV2(nn.Module):
         
         return z_fused
     
-    def get_halt_prob(self, z_state):
-        """Get halting probability from [CLS]-like first token"""
-        return self.halt_unit(z_state[:, 0, :]).squeeze(-1)
+    def get_q_logits(self, z_state):
+        """Get Q-values for halt/continue decision from first token
+        
+        Returns:
+            q_halt_logits: [B] - Q-value for halting
+            q_continue_logits: [B] - Q-value for continuing
+        """
+        q_logits = self.q_head(z_state[:, 0, :])  # [B, 2]
+        return q_logits[:, 0], q_logits[:, 1]  # q_halt, q_continue
 
 
 class PositionalEncoding(nn.Module):
@@ -355,7 +367,8 @@ class PositionalEncoding(nn.Module):
 
 class NanoACTv2(nn.Module):
     """
-    Improved ACT model with proper adaptive computation
+    HRM-style ACT model with Q-learning halting mechanism
+    Based on sapientinc/HRM architecture
     """
     
     def __init__(self, tokenizer, config=ConfigV2):
@@ -415,9 +428,14 @@ class NanoACTv2(nn.Module):
         self.lm_head.weight = self.embedding.weight  # Tie embeddings
         
         self.config = config
-        self.halt_threshold = 1.0 - 1e-3  # Cumulative halt threshold
     
     def forward(self, input_ids, attention_mask=None, labels=None, return_act_stats=False):
+        """
+        HRM-style forward with Q-learning halting.
+        
+        The halting decision is made by comparing q_halt vs q_continue.
+        During training, exploration is added to prevent collapse.
+        """
         device = input_ids.device
         B = input_ids.size(0)
         
@@ -426,75 +444,94 @@ class NanoACTv2(nn.Module):
         src_padding_mask = (input_ids == self.pad_token_id)
         memory = self.encoder(src_emb, src_key_padding_mask=src_padding_mask)
         
-        # ACT Loop with proper halting
+        # Initialize reasoning state
         L, D = memory.shape[1], memory.shape[2]
-        z = self.act_core.state_init.expand(B, L, D)
+        z = self.act_core.state_init.expand(B, L, D).clone()
         memory_pos = memory + self.act_core.pos_embed[:, :L, :]
         
-        # Track ACT variables
-        halting_prob = torch.zeros(B, device=device)
-        remainders = torch.zeros(B, device=device)
-        n_updates = torch.zeros(B, device=device)
+        # Track steps and halting
+        steps = torch.zeros(B, dtype=torch.int32, device=device)
+        halted = torch.zeros(B, dtype=torch.bool, device=device)
         
-        # Accumulate weighted states
-        accumulated_state = torch.zeros(B, L, D, device=device)
+        # Store Q-logits for loss computation
+        final_q_halt_logits = torch.zeros(B, device=device)
+        final_q_continue_logits = torch.zeros(B, device=device)
+        target_q_continue = None  # For bootstrapping
         
-        # Track per-step info for loss
-        step_halt_probs = []
-        step_states = []
-        
+        # HRM-style ACT loop
         for step in range(self.config.MAX_ACT_STEPS):
-            # Forward step
+            # Forward reasoning step
             z = self.act_core.forward_step(z, memory_pos, mask=(~src_padding_mask).long(), step=step)
             
-            # Get halt probability
-            p = self.act_core.get_halt_prob(z)  # [B]
-            step_halt_probs.append(p)
+            # Get Q-values for halt/continue
+            q_halt, q_continue = self.act_core.get_q_logits(z)
             
-            # Determine which samples are still running
-            still_running = (halting_prob < self.halt_threshold).float()
+            # Update steps for non-halted samples
+            steps = steps + (~halted).int()
             
-            # Compute new halting probability
-            new_halted = (halting_prob + p * still_running > self.halt_threshold).float() * still_running
-            still_running_new = still_running - new_halted
+            # Check if this is the last step
+            is_last_step = (steps >= self.config.MAX_ACT_STEPS)
             
-            # Update remainders for newly halted
-            remainders = remainders + new_halted * (1 - halting_prob)
+            # Determine halting (HRM style)
+            with torch.no_grad():
+                should_halt = is_last_step.clone()
+                
+                if self.training and self.config.MAX_ACT_STEPS > 1:
+                    # Halt when q_halt > q_continue
+                    should_halt = should_halt | (q_halt > q_continue)
+                    
+                    # Exploration: randomly force some samples to continue
+                    # This prevents the model from collapsing to always halt early
+                    explore_mask = torch.rand(B, device=device) < self.config.HALT_EXPLORATION_PROB
+                    min_explore_steps = torch.randint(2, self.config.MAX_ACT_STEPS + 1, (B,), device=device)
+                    should_halt = should_halt & (~explore_mask | (steps >= min_explore_steps))
+                
+                # Update halted status
+                newly_halted = should_halt & (~halted)
+                halted = halted | should_halt
             
-            # Update halting probability
-            halting_prob = halting_prob + p * still_running
+            # Store Q-logits for samples that just halted
+            final_q_halt_logits = torch.where(newly_halted, q_halt, final_q_halt_logits)
+            final_q_continue_logits = torch.where(newly_halted, q_continue, final_q_continue_logits)
             
-            # Compute weights for this step
-            update_weights = p * still_running + new_halted * remainders
+            # For samples still running, compute target Q for bootstrapping
+            if self.training and not is_last_step.all():
+                with torch.no_grad():
+                    # One more step to get next Q-values
+                    z_next = self.act_core.forward_step(z.clone(), memory_pos, mask=(~src_padding_mask).long(), step=step+1)
+                    next_q_halt, next_q_continue = self.act_core.get_q_logits(z_next)
+                    
+                    # Target Q: max of next Q-values (like DQN)
+                    next_is_last = ((steps + 1) >= self.config.MAX_ACT_STEPS)
+                    target_q = torch.where(
+                        next_is_last,
+                        torch.sigmoid(next_q_halt),
+                        torch.sigmoid(torch.maximum(next_q_halt, next_q_continue))
+                    )
+                    
+                    if target_q_continue is None:
+                        target_q_continue = target_q.clone()
+                    else:
+                        # Update for samples that are still running
+                        target_q_continue = torch.where(~halted, target_q, target_q_continue)
             
-            # Accumulate weighted state
-            accumulated_state = accumulated_state + update_weights.view(B, 1, 1) * z
-            
-            # Track updates
-            n_updates = n_updates + still_running
-            
-            step_states.append(z.clone())
-            
-            # Check if all samples have halted
-            if (halting_prob >= self.halt_threshold).all():
+            # Early exit if all halted
+            if halted.all():
                 break
         
-        # Handle samples that never halted
-        not_halted = (halting_prob < self.halt_threshold).float()
-        remainders = remainders + not_halted * (1 - halting_prob)
-        accumulated_state = accumulated_state + remainders.view(B, 1, 1) * z
-        n_updates = n_updates + not_halted
+        # Handle samples that never halted (use last state)
+        final_q_halt_logits = torch.where(~halted, q_halt, final_q_halt_logits)
+        final_q_continue_logits = torch.where(~halted, q_continue, final_q_continue_logits)
         
-        # Final output
-        z_out = self.act_core.output_proj(accumulated_state)
+        # Final output projection
+        z_out = self.act_core.output_proj(z)
         enhanced_memory = memory + z_out
         
         result = {
             'enhanced_memory': enhanced_memory,
-            'n_updates': n_updates,
-            'remainders': remainders,
-            'step_halt_probs': step_halt_probs,
-            'step_states': step_states,
+            'n_updates': steps.float(),
+            'q_halt_logits': final_q_halt_logits,
+            'q_continue_logits': final_q_continue_logits,
         }
         
         # Compute loss if labels provided
@@ -525,28 +562,40 @@ class NanoACTv2(nn.Module):
             
             logits = self.lm_head(dec_out)
             
-            # Language modeling loss
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            # Language modeling loss (with label smoothing)
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100, label_smoothing=self.config.LABEL_SMOOTHING)
             lm_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
             
-            # Ponder cost (ACT regularization) - penalize using more steps
-            ponder_cost = n_updates.mean() * self.config.PONDER_COST
-            
-            # Remainder cost - encourage clean halting
-            remainder_cost = remainders.mean() * self.config.TIME_PENALTY
-            
-            # Total loss
-            total_loss = lm_loss + ponder_cost + remainder_cost
-            
-            # Accuracy
+            # Compute sequence accuracy for Q-learning target
             preds = logits.argmax(dim=-1)
             mask = labels != -100
             correct = (preds == labels) & mask
-            seq_correct = (correct.sum(dim=-1) == mask.sum(dim=-1)).float()
+            loss_counts = mask.sum(dim=-1)
+            seq_correct = ((correct.sum(dim=-1) == loss_counts) & (loss_counts > 0)).float()
+            
+            # Q-halt loss: train to predict if answer is correct
+            # If correct, q_halt should be high; if wrong, q_halt should be low
+            q_halt_loss = F.binary_cross_entropy_with_logits(
+                final_q_halt_logits, 
+                seq_correct,
+                reduction='mean'
+            )
+            
+            # Q-continue loss: bootstrapping from next step Q-values
+            q_continue_loss = torch.tensor(0.0, device=device)
+            if target_q_continue is not None:
+                q_continue_loss = F.binary_cross_entropy_with_logits(
+                    final_q_continue_logits,
+                    target_q_continue.detach(),
+                    reduction='mean'
+                )
+            
+            # Total loss (HRM style)
+            total_loss = lm_loss + self.config.Q_LOSS_WEIGHT * (q_halt_loss + q_continue_loss)
             
             result['lm_loss'] = lm_loss
-            result['ponder_cost'] = ponder_cost
-            result['remainder_cost'] = remainder_cost
+            result['q_halt_loss'] = q_halt_loss
+            result['q_continue_loss'] = q_continue_loss
             result['total_loss'] = total_loss
             result['logits'] = logits
             result['is_correct'] = seq_correct
@@ -655,7 +704,7 @@ def evaluate(model, dataloader, device, num_samples=5):
 
 def train(config=ConfigV2):
     print("=" * 60)
-    print("ACT-HRM Training V2 - Improved ACT Mechanism")
+    print("ACT-HRM Training V2 - HRM-style Q-learning Halting")
     print("=" * 60)
     print(f"Device: {config.DEVICE}")
     print(f"Config: {config.to_dict()}")
@@ -703,11 +752,12 @@ def train(config=ConfigV2):
     )
     
     total_steps = len(train_loader) * config.EPOCHS
+    warmup_ratio = min(config.WARMUP_STEPS / total_steps, 0.1)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr=config.LEARNING_RATE,
         total_steps=total_steps,
-        pct_start=0.1
+        pct_start=warmup_ratio
     )
     
     all_metrics = {
@@ -729,7 +779,8 @@ def train(config=ConfigV2):
         epoch_metrics = {
             'epoch': epoch + 1,
             'lm_loss': 0,
-            'ponder_cost': 0,
+            'q_halt_loss': 0,
+            'q_continue_loss': 0,
             'avg_steps': 0,
             'memory': {}
         }
@@ -753,18 +804,21 @@ def train(config=ConfigV2):
             scheduler.step()
             
             epoch_metrics['lm_loss'] += result['lm_loss'].item()
-            epoch_metrics['ponder_cost'] += result['ponder_cost'].item()
+            epoch_metrics['q_halt_loss'] += result['q_halt_loss'].item()
+            epoch_metrics['q_continue_loss'] += result['q_continue_loss'].item()
             epoch_metrics['avg_steps'] += result['n_updates'].mean().item()
             
             pbar.set_postfix({
                 'lm_loss': f"{result['lm_loss'].item():.3f}",
+                'q_halt': f"{result['q_halt_loss'].item():.3f}",
                 'steps': f"{result['n_updates'].mean().item():.1f}"
             })
         
         # Normalize
         n_batches = len(train_loader)
         epoch_metrics['lm_loss'] /= n_batches
-        epoch_metrics['ponder_cost'] /= n_batches
+        epoch_metrics['q_halt_loss'] /= n_batches
+        epoch_metrics['q_continue_loss'] /= n_batches
         epoch_metrics['avg_steps'] /= n_batches
         epoch_metrics['memory'] = get_memory_usage()
         

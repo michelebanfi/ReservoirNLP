@@ -51,4 +51,4 @@ def plot_metrics(filepath):
     plt.show()
 
 if __name__ == "__main__":
-    plot_metrics("results/metrics_20251219_103004.json")
+    plot_metrics("results/metrics_v2_20251221_175005.json")
