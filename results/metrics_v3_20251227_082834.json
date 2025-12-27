@@ -1,0 +1,207 @@
+{
+  "config": {
+    "D_MODEL": 512,
+    "N_HEADS": 8,
+    "N_HIGH_CYCLES": 2,
+    "N_LOW_STEPS": 4,
+    "N_HRM_LAYERS": 2,
+    "MAX_SEGMENTS": 8,
+    "MIN_SEGMENTS_PROB": 0.1,
+    "DROPOUT": 0.1,
+    "BATCH_SIZE": 16,
+    "LEARNING_RATE": 0.0001,
+    "WEIGHT_DECAY": 1.0,
+    "EPOCHS": 10,
+    "THINKING_WARMUP_EPOCHS": 5,
+    "WARMUP_STEPS": 1000,
+    "GRADIENT_CLIP": 1.0,
+    "MAX_SRC_LEN": 256,
+    "MAX_TGT_LEN": 32,
+    "TRAIN_SIZE": 10000,
+    "VAL_SIZE": 1000,
+    "TEST_SIZE": 1000,
+    "NUM_VAL_SAMPLES": 5,
+    "TOKENIZER_NAME": "google/flan-t5-base",
+    "RESULTS_DIR": "results",
+    "MODEL_SAVE_PATH": "models/act_qa_model_v3.pt",
+    "DEVICE": "cuda"
+  },
+  "params": {
+    "total": 76455938,
+    "trainable": 76455938
+  },
+  "train": [
+    {
+      "epoch": 1,
+      "lm_loss": 16.792011535360256,
+      "q_loss": 0.0,
+      "segments": 5.0688,
+      "memory": {
+        "gpu_allocated_gb": 1.138942464,
+        "gpu_reserved_gb": 8.558477312,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 2,
+      "lm_loss": 7.476488709487913,
+      "q_loss": 0.0,
+      "segments": 4.9952,
+      "memory": {
+        "gpu_allocated_gb": 1.138244096,
+        "gpu_reserved_gb": 8.558477312,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 3,
+      "lm_loss": 6.372975045897168,
+      "q_loss": 0.0,
+      "segments": 4.8704,
+      "memory": {
+        "gpu_allocated_gb": 1.139292672,
+        "gpu_reserved_gb": 8.558477312,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 4,
+      "lm_loss": 5.980017867008845,
+      "q_loss": 0.0,
+      "segments": 5.0,
+      "memory": {
+        "gpu_allocated_gb": 1.13999104,
+        "gpu_reserved_gb": 8.558477312,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 5,
+      "lm_loss": 5.6861628364145185,
+      "q_loss": 0.0,
+      "segments": 5.1664,
+      "memory": {
+        "gpu_allocated_gb": 1.13999104,
+        "gpu_reserved_gb": 8.558477312,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 6,
+      "lm_loss": 5.4914907688617705,
+      "q_loss": 0.27085793114081025,
+      "segments": 8.0,
+      "memory": {
+        "gpu_allocated_gb": 1.139306496,
+        "gpu_reserved_gb": 8.625586176,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 7,
+      "lm_loss": 5.27301253581047,
+      "q_loss": 0.14819697019942105,
+      "segments": 8.0,
+      "memory": {
+        "gpu_allocated_gb": 1.139306496,
+        "gpu_reserved_gb": 8.625586176,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 8,
+      "lm_loss": 5.061073629617691,
+      "q_loss": 0.1692514892756939,
+      "segments": 8.0,
+      "memory": {
+        "gpu_allocated_gb": 1.139306496,
+        "gpu_reserved_gb": 8.625586176,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 9,
+      "lm_loss": 4.899932703781128,
+      "q_loss": 0.19521392585784197,
+      "segments": 8.0,
+      "memory": {
+        "gpu_allocated_gb": 1.139306496,
+        "gpu_reserved_gb": 8.625586176,
+        "cpu_percent": 4.4
+      }
+    },
+    {
+      "epoch": 10,
+      "lm_loss": 4.783283484458924,
+      "q_loss": 0.22639764048159122,
+      "segments": 8.0,
+      "memory": {
+        "gpu_allocated_gb": 1.13825792,
+        "gpu_reserved_gb": 8.625586176,
+        "cpu_percent": 4.7
+      }
+    }
+  ],
+  "validation": [
+    {
+      "epoch": 1,
+      "loss": 8.978707676842099,
+      "accuracy": 0.0,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 2,
+      "loss": 7.27927107281155,
+      "accuracy": 0.0,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 3,
+      "loss": 7.23413914725894,
+      "accuracy": 0.008,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 4,
+      "loss": 6.864737329028902,
+      "accuracy": 0.003,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 5,
+      "loss": 6.870346205575125,
+      "accuracy": 0.003,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 6,
+      "loss": 6.759265339563763,
+      "accuracy": 0.0,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 7,
+      "loss": 6.7002996565803645,
+      "accuracy": 0.0,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 8,
+      "loss": 6.7061980868142745,
+      "accuracy": 0.006,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 9,
+      "loss": 6.826594307309105,
+      "accuracy": 0.0,
+      "avg_segments": 8.0
+    },
+    {
+      "epoch": 10,
+      "loss": 6.833579684060718,
+      "accuracy": 0.009,
+      "avg_segments": 8.0
+    }
+  ]
+}
