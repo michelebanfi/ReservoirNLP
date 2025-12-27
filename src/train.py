@@ -71,6 +71,8 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
     print(f"{'Question':<50} | {'Target':<30} | {'T5 Baseline':<30} | {'HRM':<30}")
     print("-" * 150)
     
+    results = []
+    
     with torch.no_grad():
         for s in samples:
             input_ids = s['input_ids'].to(device)
@@ -90,7 +92,9 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
                 if q_probs[0,0] > q_probs[0,1] and m>=1:
                     break
             
-            enhanced = memory + zH
+            enhanced_memory = torch.cat([memory, zH], dim=1)
+            zH_mask = torch.zeros((B, L), dtype=torch.bool, device=device)
+            enhanced_mask = torch.cat([src_mask, zH_mask], dim=1)
             
             # Generate
             # We need to use autoregressive generation manually or wrap model
@@ -100,7 +104,7 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             decoder_input = torch.tensor([[0]], device=device) # Pad/Start
             gen_toks = []
             for _ in range(32):
-                logits = model.decode(enhanced, decoder_input, src_mask) # logits [1, Seq, Vocab]
+                logits = model.decode(enhanced_memory, decoder_input, enhanced_mask) # logits [1, Seq, Vocab]
                 next_tok = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
                 if next_tok.item() == 1: break # EOS
                 gen_toks.append(next_tok.item())
@@ -115,7 +119,16 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             h_disp = (hrm_ans[:27] + '..') if len(hrm_ans) > 27 else hrm_ans
             
             print(f"{q_disp:<50} | {t_disp:<30} | {b_disp:<30} | {h_disp:<30}")
+            
+            results.append({
+                'question': s['question'],
+                'target': s['target'],
+                'baseline': s['baseline'],
+                'hrm': hrm_ans
+            })
+            
     print("-" * 150 + "\n")
+    return results
 
 def train_step(model, batch, optimizer, config, epoch):
     device = config.DEVICE
@@ -145,9 +158,14 @@ def train_step(model, batch, optimizer, config, epoch):
         zH, zL = model.hrm_core.forward_segment(zH_in, zL_in, current_memory, key_padding_mask=src_mask)
         
         # Decode
-        # Enhanced memory
-        enhanced_memory = current_memory + zH
-        logits = model.decode(enhanced_memory, labels, src_mask)
+        # Enhanced memory = Concat(memory, zH) to preserve original tokens
+        enhanced_memory = torch.cat([current_memory, zH], dim=1)
+        
+        # Extend mask: zH is always valid (False in bool mask)
+        zH_mask = torch.zeros((B, L), dtype=torch.bool, device=device)
+        enhanced_mask = torch.cat([src_mask, zH_mask], dim=1)
+        
+        logits = model.decode(enhanced_memory, labels, enhanced_mask)
         
         lm_loss = compute_loss(logits, labels)
         
@@ -188,18 +206,36 @@ def train_main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
     
     print("Starting Loop...")
+    metrics_history = []
+    os.makedirs(cfg.RESULTS_DIR, exist_ok=True)
+    metrics_file = os.path.join(cfg.RESULTS_DIR, "metrics.json")
+    
     for epoch in range(cfg.EPOCHS):
         model.train()
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
         
         epoch_loss = 0
+        steps = 0
         for batch in pbar:
             metrics = train_step(model, batch, optimizer, cfg, epoch)
             epoch_loss += metrics['loss']
+            steps += 1
             pbar.set_postfix(metrics)
             
+        avg_loss = epoch_loss / steps
+        
         # Comparison
-        run_validation_comparison(model, tokenizer, validation_samples, epoch)
+        comparisons = run_validation_comparison(model, tokenizer, validation_samples, epoch)
+        
+        # Save Metrics
+        epoch_metrics = {
+            'epoch': epoch + 1,
+            'loss': avg_loss,
+            'validation_samples': comparisons
+        }
+        metrics_history.append(epoch_metrics)
+        with open(metrics_file, 'w') as f:
+            json.dump(metrics_history, f, indent=4)
         
         if (epoch + 1) % 1 == 0:
             torch.save(model.state_dict(), cfg.MODEL_SAVE_PATH)
