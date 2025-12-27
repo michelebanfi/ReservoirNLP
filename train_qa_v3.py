@@ -1,19 +1,6 @@
-"""
-ACT-HRM Training V3 - Correct HRM Implementation
-
-Key fixes from V2:
-1. TRUE hierarchical structure: H-module (slow) + L-module (fast)  
-2. Deep supervision: multiple segments with detached state
-3. Pre-trained encoder option for text understanding
-4. Proper 1-step gradient approximation
-5. Stablemax for better generalization (from HRM paper)
-
-Based on: https://arxiv.org/abs/2506.21734 and https://github.com/sapientinc/HRM
-"""
-
 from torch.utils.data import Dataset, DataLoader
 from datasets import load_dataset
-from transformers import AutoTokenizer, T5EncoderModel
+from transformers import AutoTokenizer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,14 +30,12 @@ class ConfigV3:
     BATCH_SIZE = 16        # Smaller for deep supervision memory
     LEARNING_RATE = 1e-4
     WEIGHT_DECAY = 1.0     # High weight decay (from HRM repo)
-    EPOCHS = 30
+    EPOCHS = 10
+    THINKING_WARMUP_EPOCHS = 5  # Force thinking for first 5 epochs
     WARMUP_STEPS = 1000
     GRADIENT_CLIP = 1.0
     
-    # Use pre-trained encoder for text understanding
-    USE_PRETRAINED_ENCODER = True
-    FREEZE_ENCODER_EPOCHS = 5  # Freeze encoder for first N epochs
-    
+    # ALWAYS Train from scratch (Pretrained removed per instruction)
     MAX_SRC_LEN = 256      # Shorter for memory efficiency
     MAX_TGT_LEN = 32
     TRAIN_SIZE = 10000     # Start smaller
@@ -59,7 +44,6 @@ class ConfigV3:
     NUM_VAL_SAMPLES = 5
     
     TOKENIZER_NAME = "google/flan-t5-base"
-    ENCODER_NAME = "google/flan-t5-base"  # Pre-trained encoder
     
     RESULTS_DIR = "results"
     MODEL_SAVE_PATH = "models/act_qa_model_v3.pt"
@@ -171,6 +155,27 @@ class SwiGLU(nn.Module):
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
 
 
+class GatedFusion(nn.Module):
+    """
+    Gated interaction for combining inputs.
+    Controls how much context flows into the primary stream.
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.gate = nn.Sequential(
+            nn.Linear(dim * 2, dim, bias=False),
+            nn.Sigmoid()
+        )
+        self.proj = nn.Linear(dim, dim, bias=False)
+
+    def forward(self, x, context):
+        # x: primary stream (e.g., zL)
+        # context: context stream (e.g., zH or input)
+        # gate = sigmoid(W * [x, context])
+        g = self.gate(torch.cat([x, context], dim=-1))
+        # out = x + g * proj(context)
+        return x + g * self.proj(context)
+
 class HRMTransformerBlock(nn.Module):
     """
     Post-Norm Transformer block for HRM modules.
@@ -210,9 +215,19 @@ class HRMModule(nn.Module):
             for _ in range(n_layers)
         ])
         
+        # Gated fusion for combining inputs
+        self.fusion = GatedFusion(dim)
+        
     def forward(self, *inputs, key_padding_mask=None):
-        # Combine inputs via addition (simple but effective, per HRM paper)
-        x = sum(inputs)
+        # Combine inputs via Gated Fusion (Primary + Contexts)
+        # inputs[0] is assumed to be the primary state
+        x = inputs[0]
+        
+        # Fuse other inputs (contexts) into x
+        if len(inputs) > 1:
+            for context in inputs[1:]:
+                x = self.fusion(x, context)
+        
         for layer in self.layers:
             x = layer(x, key_padding_mask=key_padding_mask)
         return x
@@ -327,28 +342,18 @@ class NanoHRMv3(nn.Module):
         vocab_size = tokenizer.vocab_size
         d_model = config.D_MODEL
         
-        # Encoder: pre-trained or from scratch
-        if config.USE_PRETRAINED_ENCODER:
-            print("   Loading pre-trained T5 encoder...")
-            self.encoder = T5EncoderModel.from_pretrained(config.ENCODER_NAME)
-            # Project T5 hidden size to our d_model if different
-            t5_dim = self.encoder.config.d_model
-            if t5_dim != d_model:
-                self.encoder_proj = nn.Linear(t5_dim, d_model)
-            else:
-                self.encoder_proj = nn.Identity()
-        else:
-            self.embedding = nn.Embedding(vocab_size, d_model)
-            self.pos_encoder = PositionalEncoding(d_model, config.MAX_SRC_LEN, config.DROPOUT)
-            encoder_layer = nn.TransformerEncoderLayer(
-                d_model=d_model,
-                nhead=config.N_HEADS,
-                dim_feedforward=d_model * 4,
-                batch_first=True,
-                dropout=config.DROPOUT
-            )
-            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=4)
-            self.encoder_proj = nn.Identity()
+        # Encoder: Always from scratch (removed pretrained option)
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, config.MAX_SRC_LEN, config.DROPOUT)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=config.N_HEADS,
+            dim_feedforward=d_model * 4,
+            batch_first=True,
+            dropout=config.DROPOUT
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=4)
+        self.encoder_proj = nn.Identity()
         
         # HRM Reasoning Core
         self.hrm_core = HierarchicalReasoningCore(d_model, config.N_HEADS, config)
@@ -371,14 +376,9 @@ class NanoHRMv3(nn.Module):
     
     def encode(self, input_ids, attention_mask=None):
         """Encode input text to representations"""
-        if self.config.USE_PRETRAINED_ENCODER:
-            with torch.set_grad_enabled(self.training):
-                enc_out = self.encoder(input_ids, attention_mask=attention_mask)
-                memory = self.encoder_proj(enc_out.last_hidden_state)
-        else:
-            src_emb = self.pos_encoder(self.embedding(input_ids))
-            padding_mask = (input_ids == self.pad_token_id)
-            memory = self.encoder(src_emb, src_key_padding_mask=padding_mask)
+        src_emb = self.pos_encoder(self.embedding(input_ids))
+        padding_mask = (input_ids == self.pad_token_id)
+        memory = self.encoder(src_emb, src_key_padding_mask=padding_mask)
         return memory
     
     def decode(self, memory, labels, src_padding_mask):
@@ -465,17 +465,12 @@ def train_step_deep_supervision(model, batch, optimizer, config, epoch):
     
     B, L = input_ids.shape
     
-    # Encode input (frozen for first few epochs if using pretrained)
+    # Encode input
     # NOTE: We detach memory for deep supervision - each segment gets independent gradients
     # This is consistent with HRM's 1-step gradient approximation
-    if config.USE_PRETRAINED_ENCODER and epoch < config.FREEZE_ENCODER_EPOCHS:
-        with torch.no_grad():
-            memory = model.encode(input_ids, attention_mask)
-        memory_for_encoder_grad = None
-    else:
-        memory = model.encode(input_ids, attention_mask)
-        # Keep a copy for encoder gradient (first segment only)
-        memory_for_encoder_grad = memory
+    memory = model.encode(input_ids, attention_mask)
+    # Keep a copy for encoder gradient (first segment only)
+    memory_for_encoder_grad = memory
     
     # Detach memory so we don't try to backprop through encoder multiple times
     # The encoder learns from the first segment's gradients only (1-step approx)
@@ -489,6 +484,20 @@ def train_step_deep_supervision(model, batch, optimizer, config, epoch):
     
     # Determine number of segments (ACT with exploration)
     M_max = config.MAX_SEGMENTS
+    
+    # Thinking Warmup Check
+    is_warmup = epoch < config.THINKING_WARMUP_EPOCHS
+    
+    if is_warmup:
+        # Force random number of segments between 2 and MAX during warmup
+        # Rationale: Model needs to learn that thinking longer != bad before it can decide when to halt.
+        M_min = torch.randint(2, M_max + 1, (1,)).item()
+        # In warmup, min is effectively the forced length if we ignore halting
+        # So we will just run until M_min-1 (M_min segments) or M_max
+        M_forced_len = M_min 
+    else:
+        # Normal training
+        M_forced_len = 1
     
     total_lm_loss = 0
     total_q_loss = 0
@@ -524,24 +533,31 @@ def train_step_deep_supervision(model, batch, optimizer, config, epoch):
             correct = (preds == labels) & mask
             seq_correct = ((correct.sum(dim=-1) == mask.sum(dim=-1)) & (mask.sum(dim=-1) > 0)).float()
         
-        # Q-halt loss: train to predict correctness
-        q_halt_loss = F.binary_cross_entropy(q_halt, seq_correct.detach())
-        
-        # Q-continue loss: bootstrap from next segment (if not last)
-        if m < M_max - 1:
-            with torch.no_grad():
-                next_zH, next_zL, next_q_halt, next_q_continue = model.forward_one_segment(
-                    zH.clone(), zL.clone(), memory_detached, key_padding_mask
-                )
-                target_q = torch.max(next_q_halt, next_q_continue)
-            q_continue_loss = F.binary_cross_entropy(q_continue, target_q.detach())
+        if is_warmup:
+            # WARMUP: Disable Q-loss, Force Execution
+            q_loss = torch.tensor(0.0, device=device, requires_grad=True) # Zero loss with grad to avoid unused param error
+            
+            # Total segment loss (only LM)
+            segment_loss = lm_loss
         else:
-            q_continue_loss = F.binary_cross_entropy(q_continue, seq_correct.detach())
-        
-        q_loss = q_halt_loss + q_continue_loss
-        
-        # Total segment loss
-        segment_loss = lm_loss + 0.5 * q_loss
+            # Q-halt loss: train to predict correctness
+            q_halt_loss = F.binary_cross_entropy(q_halt, seq_correct.detach())
+            
+            # Q-continue loss: bootstrap from next segment (if not last)
+            if m < M_max - 1:
+                with torch.no_grad():
+                    next_zH, next_zL, next_q_halt, next_q_continue = model.forward_one_segment(
+                        zH.clone(), zL.clone(), memory_detached, key_padding_mask
+                    )
+                    target_q = torch.max(next_q_halt, next_q_continue)
+                q_continue_loss = F.binary_cross_entropy(q_continue, target_q.detach())
+            else:
+                q_continue_loss = F.binary_cross_entropy(q_continue, seq_correct.detach())
+            
+            q_loss = q_halt_loss + q_continue_loss
+            
+            # Total segment loss
+            segment_loss = lm_loss + 0.5 * q_loss
         
         # Backprop for this segment
         optimizer.zero_grad()
@@ -563,20 +579,33 @@ def train_step_deep_supervision(model, batch, optimizer, config, epoch):
         total_q_loss += q_loss.item()
         total_segments += 1
         
-        # Halting decision (only during training with exploration)
+        # Halting decision
         with torch.no_grad():
-            # Sample M_min for exploration
-            if torch.rand(1).item() < config.MIN_SEGMENTS_PROB:
-                M_min = torch.randint(2, M_max + 1, (1,)).item()
+            if is_warmup:
+                # During warmup, ignore Q-head and just run until forced length
+                should_halt = torch.tensor([False] * B, device=device)
+                
+                # Check if we reached the random forced length (m is 0-indexed)
+                if m >= M_forced_len - 1:
+                    should_halt = torch.tensor([True] * B, device=device)
+                    
+                halted = halted | should_halt
+                if halted.all():
+                    break
             else:
-                M_min = 1
-            
-            # Halt when q_halt > q_continue and past minimum
-            should_halt = (q_halt > q_continue) & (m >= M_min - 1)
-            halted = halted | should_halt
-            
-            if halted.all():
-                break
+                # Normal ACT with exploration
+                # Sample M_min for exploration
+                if torch.rand(1).item() < config.MIN_SEGMENTS_PROB:
+                    M_min = torch.randint(2, M_max + 1, (1,)).item()
+                else:
+                    M_min = 1
+                
+                # Halt when q_halt > q_continue and past minimum
+                should_halt = (q_halt > q_continue) & (m >= M_min - 1)
+                halted = halted | should_halt
+                
+                if halted.all():
+                    break
     
     metrics = {
         'lm_loss': total_lm_loss / total_segments,
@@ -734,13 +763,10 @@ def train(config=ConfigV3):
         }
         
         # Freeze/unfreeze encoder
-        if config.USE_PRETRAINED_ENCODER:
-            freeze = epoch < config.FREEZE_ENCODER_EPOCHS
-            for param in model.encoder.parameters():
-                param.requires_grad = not freeze
-            if epoch == config.FREEZE_ENCODER_EPOCHS:
-                print(f"\n   Unfreezing encoder at epoch {epoch + 1}")
-        
+        # Warmup notification
+        if epoch < config.THINKING_WARMUP_EPOCHS:
+             print(f"\n   [WARMUP MODE]: ACT disabled. Q-head waiting. Forcing {config.MAX_SEGMENTS} segments logic.")
+             
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config.EPOCHS}", ncols=100)
         
         for batch in pbar:
