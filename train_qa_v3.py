@@ -53,7 +53,7 @@ class ConfigV3:
     @classmethod
     def to_dict(cls):
         return {k: v for k, v in vars(cls).items() 
-                if not k.startswith('_') and not callable(v)}
+                if not k.startswith('_') and not isinstance(v, classmethod) and not callable(v)}
 
 
 def get_memory_usage():
