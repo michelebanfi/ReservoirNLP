@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
 from src.config import Config
