@@ -1,3 +1,5 @@
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
 import torch.nn.functional as F
 from src.config import Config

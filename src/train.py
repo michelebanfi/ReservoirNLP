@@ -1,3 +1,5 @@
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -177,13 +179,16 @@ def train_step(model, batch, optimizer, config, epoch):
         
         loss = lm_loss
         
-        optimizer.zero_grad()
+        # Backward (accumulate gradients)
         loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), config.GRADIENT_CLIP)
-        optimizer.step()
         
         total_loss += loss.item()
         segment_count += 1
+        
+    # Validation / Verify gradients?
+    nn.utils.clip_grad_norm_(model.parameters(), config.GRADIENT_CLIP)
+    optimizer.step()
+    optimizer.zero_grad()
     
     return {'loss': total_loss / segment_count}
 
@@ -200,9 +205,13 @@ def train_main():
     
     print(f"Model Parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     
+    # Curriculum Learning: Freeze T5 initially
+    model.freeze_t5()
+    print("T5 Backbone Frozen for initial training.")
+    
     train_loader, val_loader = get_dataloaders(tokenizer, cfg)
     
-    # Optimizer (T5 usually requires scheduling, but standard AdamW ok for now)
+    # Optimizer (Include all parameters, even frozen ones, so they are tracked when unfrozen)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=cfg.WEIGHT_DECAY)
     
     print("Starting Loop...")
@@ -211,11 +220,20 @@ def train_main():
     metrics_file = os.path.join(cfg.RESULTS_DIR, "metrics.json")
     
     for epoch in range(cfg.EPOCHS):
+        # Curriculum: Unfreeze after N epochs (e.g., 2)
+        if epoch == 2:
+            model.unfreeze_t5()
+            print("\n>>> Unfreezing T5 Backbone for Fine-tuning! <<<\n")
+            
         model.train()
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
         
         epoch_loss = 0
         steps = 0
+        
+        # Zero grad before batch
+        optimizer.zero_grad()
+        
         for batch in pbar:
             metrics = train_step(model, batch, optimizer, cfg, epoch)
             epoch_loss += metrics['loss']

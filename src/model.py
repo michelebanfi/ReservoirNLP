@@ -15,6 +15,20 @@ class RMSNorm(nn.Module):
         var = torch.mean(x ** 2, dim=-1, keepdim=True)
         return x * torch.rsqrt(var + self.eps) * self.weight
 
+class SinusoidalPositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
+
 class SwiGLU(nn.Module):
     def __init__(self, dim, hidden_dim=None):
         super().__init__()
@@ -44,7 +58,7 @@ class GatedResidualAdapter(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.proj = nn.Linear(dim, dim, bias=False)
-        self.act = nn.Tanh()
+        self.act = nn.GELU()
         # Initialize gate to 0 to start as Identity (T5 baseline)
         self.gate = nn.Parameter(torch.zeros(1))
         
@@ -118,6 +132,8 @@ class HierarchicalReasoningCore(nn.Module):
         self.H_module = HRMModule(dim, num_heads, config.N_HRM_LAYERS, config.DROPOUT)
         self.L_module = HRMModule(dim, num_heads, config.N_HRM_LAYERS, config.DROPOUT)
         
+        self.pos_encoder = SinusoidalPositionalEncoding(dim, max_len=2048)
+        
         self.q_head = nn.Linear(dim, 2, bias=True)
         with torch.no_grad():
             self.q_head.weight.zero_()
@@ -138,12 +154,20 @@ class HierarchicalReasoningCore(nn.Module):
         # 1-step gradient approximation
         with torch.no_grad():
             for i in range(total_steps - 1):
-                zL = self.L_module(zL, [zH, x], key_padding_mask=key_padding_mask)
+                # Add PE to zL before processing to reinforce order
+                zL_pe = self.pos_encoder(zL) 
+                # Note: inputs to L_module are (state, contexts). 
+                # We should pass zL_pe as state? 
+                # HRMModule forwards state through transformer blocks.
+                zL = self.L_module(zL_pe, [zH, x], key_padding_mask=key_padding_mask)
+                
                 if (i + 1) % T == 0:
-                    zH = self.H_module(zH, [zL], key_padding_mask=key_padding_mask)
+                     # Add PE to zH
+                    zH_pe = self.pos_encoder(zH)
+                    zH = self.H_module(zH_pe, [zL], key_padding_mask=key_padding_mask)
         
-        zL = self.L_module(zL, [zH.detach(), x], key_padding_mask=key_padding_mask) 
-        zH = self.H_module(zH, [zL], key_padding_mask=key_padding_mask)
+        zL = self.L_module(self.pos_encoder(zL), [zH.detach(), x], key_padding_mask=key_padding_mask) 
+        zH = self.H_module(self.pos_encoder(zH), [zL], key_padding_mask=key_padding_mask)
         
         return zH, zL
     
@@ -174,6 +198,16 @@ class NanoHRMv3(nn.Module):
         
         # Gated Residual Adapter (Fix for Concatenation/Addition issues)
         self.adapter = GatedResidualAdapter(d_model)
+        
+    def freeze_t5(self):
+        print("Freezing T5 parameters...")
+        for param in self.t5_model.parameters():
+            param.requires_grad = False
+            
+    def unfreeze_t5(self):
+        print("Unfreezing T5 parameters...")
+        for param in self.t5_model.parameters():
+            param.requires_grad = True
         
     def encode(self, input_ids):
         # T5 Encoder expects attention_mask (1=valid, 0=pad)

@@ -1,3 +1,5 @@
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
 from src.config import Config
 from src.model import NanoHRMv3
