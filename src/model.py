@@ -40,6 +40,20 @@ class GatedFusion(nn.Module):
         g = self.gate(torch.cat([x, context], dim=-1))
         return x + g * self.proj(context)
 
+class GatedResidualAdapter(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.proj = nn.Linear(dim, dim, bias=False)
+        self.act = nn.Tanh()
+        # Initialize gate to 0 to start as Identity (T5 baseline)
+        self.gate = nn.Parameter(torch.zeros(1))
+        
+    def forward(self, memory, reasoning):
+        # memory: [B, L, D]
+        # reasoning: [B, L, D] (zH)
+        # Returns: memory + gate * tanh(proj(reasoning))
+        return memory + self.gate * self.act(self.proj(reasoning))
+
 class HRMTransformerBlock(nn.Module):
     def __init__(self, dim, num_heads, dropout=0.1):
         super().__init__()
@@ -157,6 +171,9 @@ class NanoHRMv3(nn.Module):
         
         # HRM Core (Random Init)
         self.hrm_core = HierarchicalReasoningCore(d_model, config.N_HEADS, config)
+        
+        # Gated Residual Adapter (Fix for Concatenation/Addition issues)
+        self.adapter = GatedResidualAdapter(d_model)
         
     def encode(self, input_ids):
         # T5 Encoder expects attention_mask (1=valid, 0=pad)

@@ -92,9 +92,9 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
                 if q_probs[0,0] > q_probs[0,1] and m>=1:
                     break
             
-            enhanced_memory = torch.cat([memory, zH], dim=1)
-            zH_mask = torch.zeros((B, L), dtype=torch.bool, device=device)
-            enhanced_mask = torch.cat([src_mask, zH_mask], dim=1)
+            enhanced_memory = model.adapter(memory, zH)
+            # Use original src_mask (zH is integrated into memory tokens)
+            enhanced_mask = src_mask
             
             # Generate
             # We need to use autoregressive generation manually or wrap model
@@ -158,12 +158,12 @@ def train_step(model, batch, optimizer, config, epoch):
         zH, zL = model.hrm_core.forward_segment(zH_in, zL_in, current_memory, key_padding_mask=src_mask)
         
         # Decode
-        # Enhanced memory = Concat(memory, zH) to preserve original tokens
-        enhanced_memory = torch.cat([current_memory, zH], dim=1)
+        # Decode
+        # Enhanced memory = Adapter(memory, zH)
+        enhanced_memory = model.adapter(current_memory, zH)
         
-        # Extend mask: zH is always valid (False in bool mask)
-        zH_mask = torch.zeros((B, L), dtype=torch.bool, device=device)
-        enhanced_mask = torch.cat([src_mask, zH_mask], dim=1)
+        # Mask remains same as original source (adapter preserves shape)
+        enhanced_mask = src_mask
         
         logits = model.decode(enhanced_memory, labels, enhanced_mask)
         
