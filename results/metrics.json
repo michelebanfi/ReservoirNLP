@@ -1,7 +1,7 @@
 [
     {
         "epoch": 1,
-        "loss": 1.94145903942585,
+        "loss": 1.8725974542140962,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -19,13 +19,13 @@
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi Levi''ss Stadium Stadium in in the the San San Francisco Francisco Bay Bay Area Area at at Santa Santa Clar Claraa,, California California"
+                "hrm": "Levi Levi''s Stadium Stadium in in the the San San Francisco Francisco Bay Bay Area Area at at Santa Santa Clar Claraa,, California"
             }
         ]
     },
     {
         "epoch": 2,
-        "loss": 1.6668764029979706,
+        "loss": 1.6614947356700898,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -49,7 +49,7 @@
     },
     {
         "epoch": 3,
-        "loss": 1.5754906128168107,
+        "loss": 1.5788041422128678,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -67,13 +67,13 @@
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "San San Francisco Francisco Bay Bay Area Area at at Santa Santa Clar Claraa,, California California.."
+                "hrm": "Levi Levi''ss Stadium Stadium"
             }
         ]
     },
     {
         "epoch": 4,
-        "loss": 1.5244563722372055,
+        "loss": 1.5311348514795304,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -97,31 +97,31 @@
     },
     {
         "epoch": 5,
-        "loss": 1.4938714084386826,
+        "loss": 1.4996349791288375,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Colorado Colorado Bro Bronncocoss"
+                "hrm": "Denver Denver Bro Bronncocoss"
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Colorado Colorado Bro"
+                "hrm": "Carolina Carolina Panther Pantherss"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi Levi''ss Stadium Stadium in in the the San San Francisco Francisco Bay Bay Area Area"
+                "hrm": "Levi Levi''ss Stadium Stadium"
             }
         ]
     },
     {
         "epoch": 6,
-        "loss": 1.4734771867752074,
+        "loss": 1.476911693072319,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -145,7 +145,7 @@
     },
     {
         "epoch": 7,
-        "loss": 1.4576647092342376,
+        "loss": 1.463710859823227,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -157,7 +157,7 @@
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Colorado Colorado Bro Bronncocoss"
+                "hrm": "Carolina Carolina Panther Pantherss"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
@@ -169,7 +169,7 @@
     },
     {
         "epoch": 8,
-        "loss": 1.4490535636663437,
+        "loss": 1.452473289346695,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -181,19 +181,19 @@
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Colorado Colorado Bro Bronncocoss"
+                "hrm": "Carolina Carolina Panther Pantherss"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi Levi''ss Stadium Stadium"
+                "hrm": "San San Francisco Francisco Bay Bay Area Area at at San San Francisco Francisco"
             }
         ]
     },
     {
         "epoch": 9,
-        "loss": 1.4388476713180542,
+        "loss": 1.4433156611442566,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
@@ -205,7 +205,7 @@
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Colorado Colorado Bro Bronncocoss"
+                "hrm": "Carolina Carolina Panther Pantherss"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
@@ -217,7 +217,7 @@
     },
     {
         "epoch": 10,
-        "loss": 1.4337967531204223,
+        "loss": 1.4376785559654235,
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
