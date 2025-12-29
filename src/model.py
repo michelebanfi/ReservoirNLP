@@ -339,3 +339,25 @@ class NanoHRMv3(nn.Module):
         sequence_output = decoder_outputs.last_hidden_state
         logits = self.lm_head(sequence_output)
         return logits
+    
+    def get_metrics(self):
+        """
+        Return current HRM-related metrics for logging/analysis.
+        Call this at validation time to understand model behavior.
+        """
+        # Reasoning pooler gate (how much reasoning is being used)
+        gate_raw = self.reasoning_pooler.gate.item()
+        gate_effective = float(torch.tanh(self.reasoning_pooler.gate).item())
+        
+        # Parameter counts
+        total_params = sum(p.numel() for p in self.parameters())
+        t5_params = sum(p.numel() for p in self.t5_model.parameters())
+        hrm_params = total_params - t5_params  # HRM + Pooler params
+        
+        return {
+            'reasoning_gate_raw': gate_raw,
+            'reasoning_gate_effective': gate_effective,  # After tanh: -1 to 1
+            'total_params_M': total_params / 1e6,
+            't5_params_M': t5_params / 1e6,
+            'hrm_params_M': hrm_params / 1e6,
+        }

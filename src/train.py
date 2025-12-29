@@ -16,6 +16,42 @@ def compute_loss(logits, labels):
     loss_fn = nn.CrossEntropyLoss(ignore_index=-100, label_smoothing=0.1)
     return loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
 
+# ============== Scoring Utilities ==============
+import re
+import string
+
+def normalize_text(text):
+    """Normalize text for QA evaluation (lowercase, remove punctuation/articles)."""
+    text = text.lower()
+    # Remove punctuation
+    text = ''.join(ch for ch in text if ch not in string.punctuation)
+    # Remove articles
+    text = re.sub(r'\b(a|an|the)\b', ' ', text)
+    # Collapse whitespace
+    text = ' '.join(text.split())
+    return text
+
+def compute_exact_match(prediction, target):
+    """Check if normalized prediction matches normalized target."""
+    return float(normalize_text(prediction) == normalize_text(target))
+
+def compute_f1(prediction, target):
+    """Compute token-level F1 score between prediction and target."""
+    pred_tokens = normalize_text(prediction).split()
+    target_tokens = normalize_text(target).split()
+    
+    if len(pred_tokens) == 0 or len(target_tokens) == 0:
+        return float(pred_tokens == target_tokens)
+    
+    common = set(pred_tokens) & set(target_tokens)
+    if len(common) == 0:
+        return 0.0
+    
+    precision = len(common) / len(pred_tokens)
+    recall = len(common) / len(target_tokens)
+    f1 = 2 * precision * recall / (precision + recall)
+    return f1
+
 def get_baseline_samples(tokenizer, config, num_samples=3):
     """
     Load Standard T5, generate answers for a few validation samples, then unload.
@@ -64,7 +100,8 @@ def get_baseline_samples(tokenizer, config, num_samples=3):
 
 def run_validation_comparison(model, tokenizer, samples, epoch):
     """
-    Run HRM on the samples and print comparison table.
+    Run HRM on the samples, collect metrics, and print comparison table.
+    Returns: (validation_samples, hrm_metrics, accuracy_metrics)
     """
     model.eval()
     device = next(model.parameters()).device
@@ -75,61 +112,101 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
     
     results = []
     
+    # Metrics accumulators
+    all_segments_used = []
+    all_q_halt = []
+    all_q_continue = []
+    hrm_exact_matches = []
+    hrm_f1_scores = []
+    baseline_exact_matches = []
+    baseline_f1_scores = []
+    
     with torch.no_grad():
         for s in samples:
             input_ids = s['input_ids'].to(device)
             
-            # Enc
+            # Encode
             memory, src_mask = model.encode(input_ids)
             B, L, D = memory.shape
             zH, zL = model.hrm_core.init_state(B, L, device)
             
-            # Run 1 segment (or max segments) for inference?
-            # Let's run fixed 2 segments for quick check, or loop until halt.
-            # Mirror query.py logic roughly
-            halted = False
-            for m in range(4): # Limit check
+            # Run HRM reasoning with ACT
+            segments_used = 0
+            final_q_halt = 0.0
+            final_q_continue = 0.0
+            
+            for m in range(4):  # Max segments
                 zH, zL = model.hrm_core.forward_segment(zH, zL, memory, key_padding_mask=src_mask)
                 q_probs = model.hrm_core.get_q_values(zH)
-                if q_probs[0,0] > q_probs[0,1] and m>=1:
+                final_q_halt = q_probs[0, 0].item()
+                final_q_continue = q_probs[0, 1].item()
+                segments_used = m + 1
+                
+                if final_q_halt > final_q_continue and m >= 1:
                     break
+            
+            all_segments_used.append(segments_used)
+            all_q_halt.append(final_q_halt)
+            all_q_continue.append(final_q_continue)
             
             enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(memory, zH, src_mask)
             
-            # Generate
-            # We need to use autoregressive generation manually or wrap model
-            # For quick visualization, we implement simple greedy loop here
-            # reusing code from query.py logic but compact
-            
-            decoder_input = torch.tensor([[0]], device=device) # Pad/Start (decoder_start_token)
+            # Generate answer
+            decoder_input = torch.tensor([[0]], device=device)
             gen_toks = []
             for _ in range(32):
-                # Use generate_step (not decode!) - no shift_right for autoregressive generation
                 logits = model.generate_step(enhanced_memory, decoder_input, enhanced_mask)
                 next_tok = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-                if next_tok.item() == 1: break # EOS
+                if next_tok.item() == 1: break
                 gen_toks.append(next_tok.item())
                 decoder_input = torch.cat([decoder_input, next_tok], dim=1)
                 
             hrm_ans = tokenizer.decode(gen_toks, skip_special_tokens=True)
             
-            # Truncate for display
+            # Compute accuracy scores
+            target = s['target']
+            baseline = s['baseline']
+            
+            hrm_exact_matches.append(compute_exact_match(hrm_ans, target))
+            hrm_f1_scores.append(compute_f1(hrm_ans, target))
+            baseline_exact_matches.append(compute_exact_match(baseline, target))
+            baseline_f1_scores.append(compute_f1(baseline, target))
+            
+            # Display
             q_disp = (s['question'][:47] + '..') if len(s['question']) > 47 else s['question']
-            t_disp = (s['target'][:27] + '..') if len(s['target']) > 27 else s['target']
-            b_disp = (s['baseline'][:27] + '..') if len(s['baseline']) > 27 else s['baseline']
+            t_disp = (target[:27] + '..') if len(target) > 27 else target
+            b_disp = (baseline[:27] + '..') if len(baseline) > 27 else baseline
             h_disp = (hrm_ans[:27] + '..') if len(hrm_ans) > 27 else hrm_ans
             
             print(f"{q_disp:<50} | {t_disp:<30} | {b_disp:<30} | {h_disp:<30}")
             
             results.append({
                 'question': s['question'],
-                'target': s['target'],
-                'baseline': s['baseline'],
-                'hrm': hrm_ans
+                'target': target,
+                'baseline': baseline,
+                'hrm': hrm_ans,
+                'segments_used': segments_used,
+                'q_halt': final_q_halt,
+                'q_continue': final_q_continue,
             })
             
     print("-" * 150 + "\n")
-    return results
+    
+    # Aggregate metrics
+    hrm_metrics = {
+        'avg_segments_used': sum(all_segments_used) / len(all_segments_used),
+        'avg_q_halt': sum(all_q_halt) / len(all_q_halt),
+        'avg_q_continue': sum(all_q_continue) / len(all_q_continue),
+    }
+    
+    accuracy_metrics = {
+        'hrm_exact_match': sum(hrm_exact_matches) / len(hrm_exact_matches),
+        'hrm_f1': sum(hrm_f1_scores) / len(hrm_f1_scores),
+        'baseline_exact_match': sum(baseline_exact_matches) / len(baseline_exact_matches),
+        'baseline_f1': sum(baseline_f1_scores) / len(baseline_f1_scores),
+    }
+    
+    return results, hrm_metrics, accuracy_metrics
 
 def train_step(model, batch, optimizer, config, epoch):
     device = config.DEVICE
@@ -238,13 +315,29 @@ def train_main():
             
         avg_loss = epoch_loss / steps
         
-        # Comparison
-        comparisons = run_validation_comparison(model, tokenizer, validation_samples, epoch)
+        # Validation with comprehensive metrics
+        comparisons, hrm_metrics, accuracy_metrics = run_validation_comparison(
+            model, tokenizer, validation_samples, epoch
+        )
         
-        # Save Metrics
+        # Get model-level metrics (gate values, param counts)
+        model_metrics = model.get_metrics()
+        
+        # Print summary
+        print(f"Epoch {epoch+1} Summary:")
+        print(f"  Loss: {avg_loss:.4f}")
+        print(f"  Reasoning Gate: {model_metrics['reasoning_gate_effective']:.4f}")
+        print(f"  Avg Segments: {hrm_metrics['avg_segments_used']:.2f}")
+        print(f"  HRM EM/F1: {accuracy_metrics['hrm_exact_match']:.2%} / {accuracy_metrics['hrm_f1']:.2%}")
+        print(f"  Baseline EM/F1: {accuracy_metrics['baseline_exact_match']:.2%} / {accuracy_metrics['baseline_f1']:.2%}")
+        
+        # Save comprehensive metrics
         epoch_metrics = {
             'epoch': epoch + 1,
             'loss': avg_loss,
+            'model_metrics': model_metrics,
+            'hrm_metrics': hrm_metrics,
+            'accuracy': accuracy_metrics,
             'validation_samples': comparisons
         }
         metrics_history.append(epoch_metrics)
