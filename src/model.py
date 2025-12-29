@@ -54,19 +54,61 @@ class GatedFusion(nn.Module):
         g = self.gate(torch.cat([x, context], dim=-1))
         return x + g * self.proj(context)
 
-class GatedResidualAdapter(nn.Module):
-    def __init__(self, dim):
+class ReasoningPooler(nn.Module):
+    """
+    Pool zH [B, L, D] into K reasoning tokens [B, K, D] using cross-attention.
+    These tokens serve as soft prompts that the decoder can attend to.
+    """
+    def __init__(self, dim, n_tokens, num_heads=8, dropout=0.1):
         super().__init__()
-        self.proj = nn.Linear(dim, dim, bias=False)
-        self.act = nn.GELU()
-        # Initialize gate to 0 to start as Identity (T5 baseline)
+        self.n_tokens = n_tokens
+        
+        # Learned query tokens for pooling
+        self.query_tokens = nn.Parameter(torch.randn(1, n_tokens, dim) * 0.02)
+        
+        # Cross-attention: queries attend over zH
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+            bias=False
+        )
+        
+        # FFN after cross-attention
+        self.mlp = SwiGLU(dim)
+        self.norm1 = RMSNorm(dim)
+        self.norm2 = RMSNorm(dim)
+        self.dropout = nn.Dropout(dropout)
+        
+        # Gating: start at 0 to allow gradual introduction
         self.gate = nn.Parameter(torch.zeros(1))
         
-    def forward(self, memory, reasoning):
-        # memory: [B, L, D]
-        # reasoning: [B, L, D] (zH)
-        # Returns: memory + gate * tanh(proj(reasoning))
-        return memory + self.gate * self.act(self.proj(reasoning))
+    def forward(self, zH, key_padding_mask=None):
+        """
+        Args:
+            zH: [B, L, D] - reasoning state from HRM
+            key_padding_mask: [B, L] boolean, True = ignore
+        Returns:
+            reasoning_tokens: [B, K, D] - pooled soft-prompt tokens
+        """
+        B = zH.size(0)
+        queries = self.query_tokens.expand(B, -1, -1)  # [B, K, D]
+        
+        # Cross-attention: queries attend to zH
+        attn_out, _ = self.cross_attn(
+            query=queries,
+            key=zH,
+            value=zH,
+            key_padding_mask=key_padding_mask
+        )
+        
+        # Residual + norm
+        x = self.norm1(queries + self.dropout(attn_out))
+        x = self.norm2(x + self.dropout(self.mlp(x)))
+        
+        # Gate the reasoning contribution (starts at 0 = pure T5)
+        return torch.tanh(self.gate) * x
 
 class HRMTransformerBlock(nn.Module):
     def __init__(self, dim, num_heads, dropout=0.1):
@@ -196,8 +238,13 @@ class NanoHRMv3(nn.Module):
         # HRM Core (Random Init)
         self.hrm_core = HierarchicalReasoningCore(d_model, config.N_HEADS, config)
         
-        # Gated Residual Adapter (Fix for Concatenation/Addition issues)
-        self.adapter = GatedResidualAdapter(d_model)
+        # Reasoning Pooler: pools zH into K soft-prompt tokens
+        self.reasoning_pooler = ReasoningPooler(
+            dim=d_model, 
+            n_tokens=config.N_REASONING_TOKENS,
+            num_heads=config.N_HEADS,
+            dropout=config.DROPOUT
+        )
         
     def freeze_t5(self):
         print("Freezing T5 parameters...")
@@ -228,24 +275,35 @@ class NanoHRMv3(nn.Module):
         
         return memory, src_mask_bool
     
+    def prepare_enhanced_memory(self, memory, zH, src_mask_bool):
+        """
+        Pool zH into K reasoning tokens and prepend to memory.
+        Returns enhanced memory [B, K+L, D] and extended mask [B, K+L].
+        """
+        # Pool zH -> [B, K, D]
+        reasoning_tokens = self.reasoning_pooler(zH, key_padding_mask=src_mask_bool)
+        
+        # Prepend reasoning tokens to memory: [B, K+L, D]
+        enhanced_memory = torch.cat([reasoning_tokens, memory], dim=1)
+        
+        # Extend mask: reasoning tokens are always valid (False = attend)
+        B = memory.size(0)
+        K = reasoning_tokens.size(1)
+        reasoning_mask = torch.zeros(B, K, dtype=torch.bool, device=memory.device)
+        enhanced_mask = torch.cat([reasoning_mask, src_mask_bool], dim=1)
+        
+        return enhanced_memory, enhanced_mask
+    
     def decode(self, memory, labels, src_padding_mask_bool):
-        # Memory here is Enhanced Memory (Encoder Out + zH)
-        
-        # T5 Decoder needs:
-        # - input_ids (shifted labels handled by T5ForConditionalGeneration usually, but here we access decoder directly)
-        # - encoder_hidden_states (= memory)
-        # - encoder_attention_mask (= src_padding_mask? No, T5 expects 1/0 int mask)
-        
+        """
+        Decode with potentially enhanced memory (can include prepended reasoning tokens).
+        This is for TRAINING with teacher forcing (labels are shifted right).
+        """
         # Reconstruct standard attention mask from bool mask
-        # src_padding_mask_bool is True where Pad.
-        # encoder_attention_mask should be 1 where Valid (False).
+        # src_padding_mask_bool is True where Pad, False where Valid
         enc_attn_mask = (~src_padding_mask_bool).long()
         
-        # Prepare Decoder Input
-        # labels are [-100, ..., EOS]
-        # We need to Shift Right.
-        # T5ForConditionalGeneration does this in forward() via `_shift_right`.
-        # We should use that helper or replicate.
+        # Prepare Decoder Input (shift right for teacher forcing)
         decoder_input_ids = self.t5_model._shift_right(labels)
         
         # Forward Decoder
@@ -262,5 +320,22 @@ class NanoHRMv3(nn.Module):
         logits = self.lm_head(sequence_output)
         return logits
     
-    # Helper for exposing components for T5 native methods if strictly needed
-    # but we are wrapping manually.
+    def generate_step(self, memory, decoder_input_ids, src_padding_mask_bool):
+        """
+        Single step of autoregressive generation (for inference).
+        Unlike decode(), this does NOT shift right - use the decoder_input_ids directly.
+        """
+        # Reconstruct standard attention mask from bool mask
+        enc_attn_mask = (~src_padding_mask_bool).long()
+        
+        # Forward Decoder (NO shift right - decoder_input_ids is already correct)
+        decoder_outputs = self.decoder(
+            input_ids=decoder_input_ids,
+            encoder_hidden_states=memory,
+            encoder_attention_mask=enc_attn_mask,
+            return_dict=True
+        )
+        
+        sequence_output = decoder_outputs.last_hidden_state
+        logits = self.lm_head(sequence_output)
+        return logits

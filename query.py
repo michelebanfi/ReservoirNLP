@@ -49,52 +49,28 @@ def generate_answer(model, tokenizer, question, context, device, max_segments=8,
             print(f"  -> Reached MAX steps ({max_segments})")
             final_m = max_segments
 
-        # 3. Decode (Greedy Autoregressive)
-        # Start with Pad/EOS? T5 usually uses pad_token_id as start?
-        # Let's check decoder start token.
-        # Ideally we use model.config.decoder_start_token_id but we don't have it set in custom config.
-        # We'll use 0 (pad) as per training code assumption.
-        
-        decoder_input = torch.tensor([[0]], device=device) # SOS
-        
-        generated_tokens = []
-        
-        enhanced_memory = memory + zH
+        # 3. Prepare enhanced memory with soft-prompt tokens
+        enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(memory, zH, src_mask)
         
         print("Generating Answer...")
+        
+        # Start with decoder_start_token_id (pad token = 0 for T5)
+        decoder_input_ids = torch.tensor([[0]], device=device)
+        generated_tokens = []
+        
         for _ in range(max_new_tokens):
-            # Re-run decoder (inefficient but simple for script)
-            # Need to pass padded mask if batching, but here B=1.
-            # Causal mask is handled inside model.decode if we passed it? 
-            # Wait, model.decode expects 'labels' style input and generates logits for all.
-            # We need to construct input incrementally.
+            # Use generate_step for autoregressive inference
+            logits = model.generate_step(enhanced_memory, decoder_input_ids, enhanced_mask)
             
-            # We need to adapt model.decode or manually call layers.
-            # model.decode does: dec_pos(emb) -> decoder -> head.
-            # It expects `labels` argument to create `decoder_input`.
-            
-            # Let's manually do what's needed for generation
-            tgt_emb = model.dec_pos(model.dec_embedding(decoder_input))
-            tgt_len = decoder_input.size(1)
-            tgt_causal_mask = torch.triu(torch.full((tgt_len, tgt_len), float('-inf'), device=device), diagonal=1)
-            
-            dec_out = model.decoder(
-                tgt=tgt_emb,
-                memory=enhanced_memory,
-                tgt_mask=tgt_causal_mask,
-                memory_key_padding_mask=src_mask
-            )
-            
-            logits = model.lm_head(dec_out) # [1, Seq, Vocab]
-            next_token_logits = logits[:, -1, :] # Last token
+            next_token_logits = logits[:, -1, :]  # Last token
             next_token = next_token_logits.argmax(dim=-1).unsqueeze(1)
             
             token_id = next_token.item()
-            if token_id == 1: # EOS for T5 is usually 1? Or tokenizer.eos_token_id?
+            if token_id == 1:  # EOS token
                 break
             
             generated_tokens.append(token_id)
-            decoder_input = torch.cat([decoder_input, next_token], dim=1)
+            decoder_input_ids = torch.cat([decoder_input_ids, next_token], dim=1)
             
         answer = tokenizer.decode(generated_tokens, skip_special_tokens=True)
         return answer, final_m

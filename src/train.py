@@ -94,19 +94,18 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
                 if q_probs[0,0] > q_probs[0,1] and m>=1:
                     break
             
-            enhanced_memory = model.adapter(memory, zH)
-            # Use original src_mask (zH is integrated into memory tokens)
-            enhanced_mask = src_mask
+            enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(memory, zH, src_mask)
             
             # Generate
             # We need to use autoregressive generation manually or wrap model
             # For quick visualization, we implement simple greedy loop here
             # reusing code from query.py logic but compact
             
-            decoder_input = torch.tensor([[0]], device=device) # Pad/Start
+            decoder_input = torch.tensor([[0]], device=device) # Pad/Start (decoder_start_token)
             gen_toks = []
             for _ in range(32):
-                logits = model.decode(enhanced_memory, decoder_input, enhanced_mask) # logits [1, Seq, Vocab]
+                # Use generate_step (not decode!) - no shift_right for autoregressive generation
+                logits = model.generate_step(enhanced_memory, decoder_input, enhanced_mask)
                 next_tok = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
                 if next_tok.item() == 1: break # EOS
                 gen_toks.append(next_tok.item())
@@ -162,10 +161,7 @@ def train_step(model, batch, optimizer, config, epoch):
         # Decode
         # Decode
         # Enhanced memory = Adapter(memory, zH)
-        enhanced_memory = model.adapter(current_memory, zH)
-        
-        # Mask remains same as original source (adapter preserves shape)
-        enhanced_mask = src_mask
+        enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(current_memory, zH, src_mask)
         
         logits = model.decode(enhanced_memory, labels, enhanced_mask)
         

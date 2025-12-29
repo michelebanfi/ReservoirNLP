@@ -10,6 +10,7 @@ class Config:
     N_HIGH_CYCLES = 2      # N: H-module updates per segment
     N_LOW_STEPS = 4        # T: L-module updates per H-cycle
     N_HRM_LAYERS = 2       # Layers per module (H/L)
+    N_REASONING_TOKENS = 4 # K: soft-prompt tokens pooled from zH
     
     # Deep Supervision & ACT
     MAX_SEGMENTS = 8       # M_max
