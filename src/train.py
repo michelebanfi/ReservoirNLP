@@ -139,12 +139,12 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             
             for m in range(4):  # Max segments
                 zH, zL = model.hrm_core.forward_segment(zH, zL, memory, key_padding_mask=src_mask)
-                q_probs = model.hrm_core.get_q_values(zH)
-                final_q_halt = q_probs[0, 0].item()
-                final_q_continue = q_probs[0, 1].item()
+                q_val = model.hrm_core.get_q_values(zH)
+                final_q_halt = q_val[0, 0].item()
+                final_q_continue = 1.0 - final_q_halt
                 segments_used = m + 1
                 
-                if final_q_halt > final_q_continue and m >= 1:
+                if final_q_halt > 0.5 and m >= 1:
                     break
             
             all_segments_used.append(segments_used)
@@ -242,9 +242,8 @@ def train_step(model, batch, optimizer, config, epoch):
         zH, zL = model.hrm_core.forward_segment(zH_in, zL_in, current_memory, key_padding_mask=src_mask)
         
         # Get Q-values for ACT loss
-        q_probs = model.hrm_core.get_q_values(zH)  # [B, 2] - sigmoid outputs
-        p_halt = q_probs[:, 0]  # Probability of halting
-        p_continue = q_probs[:, 1]  # Probability of continuing
+        q_val = model.hrm_core.get_q_values(zH)  # [B, 1] - sigmoid output
+        p_halt = q_val.squeeze(-1)  # [B]
         halting_probs.append(p_halt.mean().item())
         
         # Decode and compute LM loss

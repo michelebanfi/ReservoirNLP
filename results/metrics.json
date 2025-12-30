@@ -1,24 +1,24 @@
 [
     {
         "epoch": 1,
-        "loss": 2.6205162044525148,
+        "loss": 2.261926414871216,
         "model_metrics": {
-            "reasoning_gate_raw": -0.05962781608104706,
-            "reasoning_gate_effective": -0.059557247906923294,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.47660359740257263,
+            "reasoning_gate_effective": 0.4435194730758667,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.5097560048103332,
+            "avg_q_continue": 0.49024399518966677
         },
         "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.6666666666666666,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.7,
+            "hrm_f1": 0.7,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -26,50 +26,113 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5097388625144958,
+                "q_continue": 0.49026113748550415
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5097389221191406,
+                "q_continue": 0.4902610778808594
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5097657442092896,
+                "q_continue": 0.49023425579071045
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5097656846046448,
+                "q_continue": 0.4902343153953552
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5097407102584839,
+                "q_continue": 0.4902592897415161
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5097540616989136,
+                "q_continue": 0.4902459383010864
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 2,
+                "q_halt": 0.5097657442092896,
+                "q_continue": 0.49023425579071045
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5097656846046448,
+                "q_continue": 0.4902343153953552
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5097540616989136,
+                "q_continue": 0.4902459383010864
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5097705721855164,
+                "q_continue": 0.49022942781448364
             }
         ]
     },
     {
         "epoch": 2,
-        "loss": 2.2128004375696184,
+        "loss": 2.195704285788536,
         "model_metrics": {
-            "reasoning_gate_raw": -0.09214585274457932,
-            "reasoning_gate_effective": -0.09188593924045563,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.4586590528488159,
+            "reasoning_gate_effective": 0.4289906919002533,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.507186233997345,
+            "avg_q_continue": 0.49281376600265503
         },
         "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.8095238095238094,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.7,
+            "hrm_f1": 0.7,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -77,50 +140,113 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5058935880661011,
+                "q_continue": 0.4941064119338989
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5058931708335876,
+                "q_continue": 0.49410682916641235
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "hrm": "Levi's Stadium",
+                "segments_used": 2,
+                "q_halt": 0.5077888369560242,
+                "q_continue": 0.49221116304397583
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5077906250953674,
+                "q_continue": 0.49220937490463257
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5056692957878113,
+                "q_continue": 0.4943307042121887
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5077027082443237,
+                "q_continue": 0.49229729175567627
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 2,
+                "q_halt": 0.507794201374054,
+                "q_continue": 0.49220579862594604
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5077918767929077,
+                "q_continue": 0.4922081232070923
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5077027082443237,
+                "q_continue": 0.49229729175567627
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.507835328578949,
+                "q_continue": 0.492164671421051
             }
         ]
     },
     {
         "epoch": 3,
-        "loss": 1.9643363936901093,
+        "loss": 1.96982500436306,
         "model_metrics": {
-            "reasoning_gate_raw": -0.09037154912948608,
-            "reasoning_gate_effective": -0.09012632817029953,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.4511897563934326,
+            "reasoning_gate_effective": 0.4228765070438385,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_q_halt": 0.4900136262178421,
+            "avg_q_continue": 0.5099863737821579
         },
         "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.8095238095238094,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.7,
+            "hrm_f1": 0.7,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -129,8 +255,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4899808168411255,
+                "q_continue": 0.5100191831588745
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
@@ -138,40 +264,103 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.48998087644577026,
+                "q_continue": 0.5100191235542297
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "hrm": "Levi's Stadium",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4900315999984741,
+                "q_continue": 0.5099684000015259
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.49003127217292786,
+                "q_continue": 0.5099687278270721
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.48996663093566895,
+                "q_continue": 0.510033369064331
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.49002426862716675,
+                "q_continue": 0.5099757313728333
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 4,
+                "q_halt": 0.49003148078918457,
+                "q_continue": 0.5099685192108154
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.49003103375434875,
+                "q_continue": 0.5099689662456512
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.49002426862716675,
+                "q_continue": 0.5099757313728333
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.4900340139865875,
+                "q_continue": 0.5099659860134125
             }
         ]
     },
     {
         "epoch": 4,
-        "loss": 1.7940266170024872,
+        "loss": 1.7990458557844162,
         "model_metrics": {
-            "reasoning_gate_raw": -0.08892480283975601,
-            "reasoning_gate_effective": -0.08869115263223648,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.44666576385498047,
+            "reasoning_gate_effective": 0.41915443539619446,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.5032378792762756,
+            "avg_q_continue": 0.4967621207237244
         },
         "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.6666666666666666,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.9,
+            "hrm_f1": 0.9,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -179,50 +368,113 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5030889511108398,
+                "q_continue": 0.49691104888916016
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5030889511108398,
+                "q_continue": 0.49691104888916016
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5033197402954102,
+                "q_continue": 0.49668025970458984
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5033195614814758,
+                "q_continue": 0.49668043851852417
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5030221343040466,
+                "q_continue": 0.49697786569595337
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 2,
+                "q_halt": 0.5032771825790405,
+                "q_continue": 0.4967228174209595
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 2,
+                "q_halt": 0.5033196806907654,
+                "q_continue": 0.4966803193092346
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5033196806907654,
+                "q_continue": 0.4966803193092346
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 2,
+                "q_halt": 0.5032771825790405,
+                "q_continue": 0.4967228174209595
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5033457279205322,
+                "q_continue": 0.4966542720794678
             }
         ]
     },
     {
         "epoch": 5,
-        "loss": 1.7081613824129105,
+        "loss": 1.7139804718017577,
         "model_metrics": {
-            "reasoning_gate_raw": -0.08738604187965393,
-            "reasoning_gate_effective": -0.08716428279876709,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.44229423999786377,
+            "reasoning_gate_effective": 0.415544331073761,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_q_halt": 0.4953503251075745,
+            "avg_q_continue": 0.5046496748924255
         },
         "accuracy": {
-            "hrm_exact_match": 0.3333333333333333,
-            "hrm_f1": 0.3333333333333333,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.9,
+            "hrm_f1": 0.9,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -231,17 +483,17 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4953424036502838,
+                "q_continue": 0.5046575963497162
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
+                "hrm": "Carolina Panthers",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4953424036502838,
+                "q_continue": 0.5046575963497162
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
@@ -249,31 +501,94 @@
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.49535319209098816,
+                "q_continue": 0.5046468079090118
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.4953531324863434,
+                "q_continue": 0.5046468675136566
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.49534907937049866,
+                "q_continue": 0.5046509206295013
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.49535179138183594,
+                "q_continue": 0.5046482086181641
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 4,
+                "q_halt": 0.49535319209098816,
+                "q_continue": 0.5046468079090118
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.4953530728816986,
+                "q_continue": 0.5046469271183014
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.49535179138183594,
+                "q_continue": 0.5046482086181641
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.49535319209098816,
+                "q_continue": 0.5046468079090118
             }
         ]
     },
     {
         "epoch": 6,
-        "loss": 1.6544730803489685,
+        "loss": 1.6615275992155074,
         "model_metrics": {
-            "reasoning_gate_raw": -0.08613762259483337,
-            "reasoning_gate_effective": -0.08592521399259567,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.43752509355545044,
+            "reasoning_gate_effective": 0.41159090399742126,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.5149350523948669,
+            "avg_q_continue": 0.4850649476051331
         },
         "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.6666666666666666,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.8,
+            "hrm_f1": 0.8,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -281,50 +596,113 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5149497985839844,
+                "q_continue": 0.4850502014160156
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5149497985839844,
+                "q_continue": 0.4850502014160156
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "segments_used": 2,
+                "q_halt": 0.5149273872375488,
+                "q_continue": 0.48507261276245117
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5149273872375488,
+                "q_continue": 0.48507261276245117
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5149551033973694,
+                "q_continue": 0.4850448966026306
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 2,
+                "q_halt": 0.514930009841919,
+                "q_continue": 0.48506999015808105
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 2,
+                "q_halt": 0.5149273872375488,
+                "q_continue": 0.48507261276245117
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.514927327632904,
+                "q_continue": 0.48507267236709595
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 2,
+                "q_halt": 0.514930009841919,
+                "q_continue": 0.48506999015808105
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5149263143539429,
+                "q_continue": 0.48507368564605713
             }
         ]
     },
     {
         "epoch": 7,
-        "loss": 1.6161047619819642,
+        "loss": 1.6210066102743148,
         "model_metrics": {
-            "reasoning_gate_raw": -0.08416976034641266,
-            "reasoning_gate_effective": -0.08397156000137329,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.43299412727355957,
+            "reasoning_gate_effective": 0.40782052278518677,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_q_halt": 0.49423496425151825,
+            "avg_q_continue": 0.5057650357484818
         },
         "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.6666666666666666,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.9,
+            "hrm_f1": 0.9,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -333,8 +711,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4940214157104492,
+                "q_continue": 0.5059785842895508
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
@@ -342,8 +720,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4940214157104492,
+                "q_continue": 0.5059785842895508
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
@@ -351,31 +729,94 @@
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4943532943725586,
+                "q_continue": 0.5056467056274414
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.49435335397720337,
+                "q_continue": 0.5056466460227966
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.49385127425193787,
+                "q_continue": 0.5061487257480621
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.49427884817123413,
+                "q_continue": 0.5057211518287659
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 4,
+                "q_halt": 0.49435317516326904,
+                "q_continue": 0.505646824836731
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.4943534731864929,
+                "q_continue": 0.5056465268135071
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.49427884817123413,
+                "q_continue": 0.5057211518287659
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.494484543800354,
+                "q_continue": 0.505515456199646
             }
         ]
     },
     {
         "epoch": 8,
-        "loss": 1.587582494187355,
+        "loss": 1.5905673461198806,
         "model_metrics": {
-            "reasoning_gate_raw": -0.08288823068141937,
-            "reasoning_gate_effective": -0.08269892632961273,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.427021324634552,
+            "reasoning_gate_effective": 0.40282899141311646,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_q_halt": 0.4978189945220947,
+            "avg_q_continue": 0.5021810054779052
         },
         "accuracy": {
-            "hrm_exact_match": 0.3333333333333333,
-            "hrm_f1": 0.3333333333333333,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.9,
+            "hrm_f1": 0.9,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -384,59 +825,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
-            }
-        ]
-    },
-    {
-        "epoch": 9,
-        "loss": 1.5654913298130035,
-        "model_metrics": {
-            "reasoning_gate_raw": -0.08208057284355164,
-            "reasoning_gate_effective": -0.08189673721790314,
-            "total_params_M": 286.520067,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.6666666666666666,
-            "hrm_f1": 0.8095238095238094,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4979669749736786,
+                "q_continue": 0.5020330250263214
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
@@ -444,40 +834,217 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.49796706438064575,
+                "q_continue": 0.5020329356193542
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "hrm": "Levi's Stadium",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.49773672223091125,
+                "q_continue": 0.5022632777690887
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.49773719906806946,
+                "q_continue": 0.5022628009319305
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.49807754158973694,
+                "q_continue": 0.5019224584102631
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.4977826774120331,
+                "q_continue": 0.5022173225879669
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 4,
+                "q_halt": 0.49773743748664856,
+                "q_continue": 0.5022625625133514
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.4977370798587799,
+                "q_continue": 0.5022629201412201
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.4977826774120331,
+                "q_continue": 0.5022173225879669
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.49766457080841064,
+                "q_continue": 0.5023354291915894
+            }
+        ]
+    },
+    {
+        "epoch": 9,
+        "loss": 1.5676245584487916,
+        "model_metrics": {
+            "reasoning_gate_raw": 0.4210570156574249,
+            "reasoning_gate_effective": 0.39782053232192993,
+            "total_params_M": 286.519298,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.941442
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.5090407252311706,
+            "avg_q_continue": 0.49095927476882933
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.9,
+            "hrm_f1": 0.9,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
+        },
+        "validation_samples": [
+            {
+                "question": "Which NFL team represented the AFC at Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5093963742256165,
+                "q_continue": 0.49060362577438354
+            },
+            {
+                "question": "Which NFL team represented the NFC at Super Bowl 50?",
+                "target": "Carolina Panthers",
+                "baseline": "Denver Broncos",
+                "hrm": "Carolina Panthers",
+                "segments_used": 2,
+                "q_halt": 0.5093962550163269,
+                "q_continue": 0.4906037449836731
+            },
+            {
+                "question": "Where did Super Bowl 50 take place?",
+                "target": "Santa Clara, California",
+                "baseline": "Levi's Stadium",
+                "hrm": "Levi's Stadium",
+                "segments_used": 2,
+                "q_halt": 0.5087860226631165,
+                "q_continue": 0.49121397733688354
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.5087859630584717,
+                "q_continue": 0.4912140369415283
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 2,
+                "q_halt": 0.5100075602531433,
+                "q_continue": 0.4899924397468567
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 2,
+                "q_halt": 0.5088676810264587,
+                "q_continue": 0.49113231897354126
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 2,
+                "q_halt": 0.5087864398956299,
+                "q_continue": 0.4912135601043701
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5087868571281433,
+                "q_continue": 0.4912131428718567
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 2,
+                "q_halt": 0.5088676810264587,
+                "q_continue": 0.49113231897354126
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 2,
+                "q_halt": 0.5087264180183411,
+                "q_continue": 0.49127358198165894
             }
         ]
     },
     {
         "epoch": 10,
-        "loss": 1.5470849198102952,
+        "loss": 1.5477377564430237,
         "model_metrics": {
-            "reasoning_gate_raw": -0.08008948713541031,
-            "reasoning_gate_effective": -0.07991869002580643,
-            "total_params_M": 286.520067,
+            "reasoning_gate_raw": 0.4124266803264618,
+            "reasoning_gate_effective": 0.39053118228912354,
+            "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
-            "hrm_params_M": 38.942211
+            "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 4.0,
-            "avg_q_halt": 0.11920291930437088,
-            "avg_q_continue": 0.5
+            "avg_q_halt": 0.49634896516799926,
+            "avg_q_continue": 0.5036510348320007
         },
         "accuracy": {
-            "hrm_exact_match": 0.3333333333333333,
-            "hrm_f1": 0.4761904761904762,
-            "baseline_exact_match": 0.3333333333333333,
-            "baseline_f1": 0.3333333333333333
+            "hrm_exact_match": 0.9,
+            "hrm_f1": 0.9428571428571428,
+            "baseline_exact_match": 0.6,
+            "baseline_f1": 0.6
         },
         "validation_samples": [
             {
@@ -486,26 +1053,89 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.49640029668807983,
+                "q_continue": 0.5035997033119202
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
+                "hrm": "Carolina Panthers",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.49640029668807983,
+                "q_continue": 0.5035997033119202
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California.",
                 "segments_used": 4,
-                "q_halt": 0.11920291930437088,
-                "q_continue": 0.5
+                "q_halt": 0.4963076710700989,
+                "q_continue": 0.5036923289299011
+            },
+            {
+                "question": "Which NFL team won Super Bowl 50?",
+                "target": "Denver Broncos",
+                "baseline": "Denver Broncos",
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.4963076710700989,
+                "q_continue": 0.5036923289299011
+            },
+            {
+                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+                "target": "gold",
+                "baseline": "gold",
+                "hrm": "gold",
+                "segments_used": 4,
+                "q_halt": 0.4965154826641083,
+                "q_continue": 0.5034845173358917
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.4963228702545166,
+                "q_continue": 0.5036771297454834
+            },
+            {
+                "question": "What day was the game played on?",
+                "target": "February 7, 2016",
+                "baseline": "February 7, 2016",
+                "hrm": "February 7, 2016",
+                "segments_used": 4,
+                "q_halt": 0.4963076710700989,
+                "q_continue": 0.5036923289299011
+            },
+            {
+                "question": "What is the AFC short for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.4963076710700989,
+                "q_continue": 0.5036923289299011
+            },
+            {
+                "question": "What was the theme of Super Bowl 50?",
+                "target": "\"golden anniversary\"",
+                "baseline": "gold",
+                "hrm": "golden anniversary",
+                "segments_used": 4,
+                "q_halt": 0.4963228702545166,
+                "q_continue": 0.5036771297454834
+            },
+            {
+                "question": "What does AFC stand for?",
+                "target": "American Football Conference",
+                "baseline": "American Football Conference",
+                "hrm": "American Football Conference",
+                "segments_used": 4,
+                "q_halt": 0.496297150850296,
+                "q_continue": 0.503702849149704
             }
         ]
     }

@@ -177,10 +177,10 @@ class HierarchicalReasoningCore(nn.Module):
         
         self.pos_encoder = SinusoidalPositionalEncoding(dim, max_len=2048)
         
-        self.q_head = nn.Linear(dim, 2, bias=True)
+        self.q_head = nn.Linear(dim, 1, bias=True)
         with torch.no_grad():
             self.q_head.weight.zero_()
-            self.q_head.bias.data = torch.tensor([-2.0, 0.0])
+            self.q_head.bias.data = torch.tensor([0.0]) # Init to 0.5 probability
         
         self.zH_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.zL_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
