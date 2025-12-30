@@ -59,7 +59,7 @@ class ReasoningPooler(nn.Module):
     Pool zH [B, L, D] into K reasoning tokens [B, K, D] using cross-attention.
     These tokens serve as soft prompts that the decoder can attend to.
     """
-    def __init__(self, dim, n_tokens, num_heads=8, dropout=0.1):
+    def __init__(self, dim, n_tokens, num_heads=8, dropout=0.1, gate_init=0.1):
         super().__init__()
         self.n_tokens = n_tokens
         
@@ -81,8 +81,9 @@ class ReasoningPooler(nn.Module):
         self.norm2 = RMSNorm(dim)
         self.dropout = nn.Dropout(dropout)
         
-        # Gating: start at 0 to allow gradual introduction
-        self.gate = nn.Parameter(torch.zeros(1))
+        # Gating: initialize slightly positive to encourage HRM usage
+        # tanh(0.1) ≈ 0.1, so ~10% HRM contribution initially
+        self.gate = nn.Parameter(torch.tensor([gate_init]))
         
     def forward(self, zH, key_padding_mask=None):
         """
@@ -243,7 +244,8 @@ class NanoHRMv3(nn.Module):
             dim=d_model, 
             n_tokens=config.N_REASONING_TOKENS,
             num_heads=config.N_HEADS,
-            dropout=config.DROPOUT
+            dropout=config.DROPOUT,
+            gate_init=config.REASONING_GATE_INIT
         )
         
     def freeze_t5(self):

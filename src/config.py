@@ -11,10 +11,13 @@ class Config:
     N_LOW_STEPS = 4        # T: L-module updates per H-cycle
     N_HRM_LAYERS = 2       # Layers per module (H/L)
     N_REASONING_TOKENS = 4 # K: soft-prompt tokens pooled from zH
+    REASONING_GATE_INIT = 0.1  # Initialize gate slightly positive to encourage HRM usage
     
     # Deep Supervision & ACT
     MAX_SEGMENTS = 8       # M_max
     MIN_SEGMENTS_PROB = 0.1
+    ACT_LOSS_WEIGHT = 0.1  # Weight for ACT halting loss
+    NUM_VAL_SAMPLES = 10   # Number of validation samples for stable metrics
     
     # Training
     DROPOUT = 0.1

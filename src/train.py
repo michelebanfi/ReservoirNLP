@@ -52,12 +52,14 @@ def compute_f1(prediction, target):
     f1 = 2 * precision * recall / (precision + recall)
     return f1
 
-def get_baseline_samples(tokenizer, config, num_samples=3):
+def get_baseline_samples(tokenizer, config, num_samples=None):
     """
-    Load Standard T5, generate answers for a few validation samples, then unload.
+    Load Standard T5, generate answers for validation samples, then unload.
     Returns: list of dicts {question, context, target, baseline_answer}
     """
-    print("Generating T5 Baseline Answers for Validation Comparison...")
+    if num_samples is None:
+        num_samples = config.NUM_VAL_SAMPLES
+    print(f"Generating T5 Baseline Answers for {num_samples} Validation Samples...")
     device = config.DEVICE
     
     # 1. Get Samples
@@ -220,8 +222,12 @@ def train_step(model, batch, optimizer, config, epoch):
     zH, zL = model.hrm_core.init_state(B, L, device)
     
     M_max = config.MAX_SEGMENTS
-    total_loss = 0
+    total_lm_loss = 0
+    total_act_loss = 0
     segment_count = 0
+    
+    prev_loss = None
+    halting_probs = []
     
     for m in range(M_max):
         zH_in = zH.detach()
@@ -235,27 +241,51 @@ def train_step(model, batch, optimizer, config, epoch):
         
         zH, zL = model.hrm_core.forward_segment(zH_in, zL_in, current_memory, key_padding_mask=src_mask)
         
-        # Decode
-        # Decode
-        # Enhanced memory = Adapter(memory, zH)
+        # Get Q-values for ACT loss
+        q_probs = model.hrm_core.get_q_values(zH)  # [B, 2] - sigmoid outputs
+        p_halt = q_probs[:, 0]  # Probability of halting
+        p_continue = q_probs[:, 1]  # Probability of continuing
+        halting_probs.append(p_halt.mean().item())
+        
+        # Decode and compute LM loss
         enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(current_memory, zH, src_mask)
-        
         logits = model.decode(enhanced_memory, labels, enhanced_mask)
-        
         lm_loss = compute_loss(logits, labels)
         
-        # Simplified Loss (Focus on LM for pretraining robustness first?)
-        # Adding Q-loss if we want ACT. 
-        # reusing logic from previous step:
-        # For now, let's keep it simple: Just LM loss to verify T5 integration works.
-        # We can add ACT loss back if it trains well.
+        # ============== ACT Loss ==============
+        # Idea: If continuing would improve loss, encourage p_continue
+        #       If loss is not improving, encourage p_halt
+        # We use the improvement ratio as a soft target
         
-        loss = lm_loss
+        if prev_loss is not None:
+            # Improvement: positive if loss decreased
+            improvement = (prev_loss - lm_loss.item())
+            
+            # Target: halt if improvement < threshold, continue if improvement > threshold
+            # Use sigmoid to create soft targets
+            threshold = 0.01  # Halt if improvement < 1%
+            
+            # Target p_halt: high if no improvement, low if improving
+            # Scale improvement to reasonable range
+            target_halt = torch.sigmoid(torch.tensor(-improvement * 10, device=device))
+            
+            # ACT loss: encourage Q-head outputs to match targets
+            # Binary cross-entropy for each head
+            act_loss = F.binary_cross_entropy(p_halt.mean(), target_halt)
+            total_act_loss += act_loss.item()
+            
+            # Combined loss
+            act_weight = config.ACT_LOSS_WEIGHT if hasattr(config, 'ACT_LOSS_WEIGHT') else 0.1
+            loss = lm_loss + act_weight * act_loss
+        else:
+            loss = lm_loss
+        
+        prev_loss = lm_loss.item()
         
         # Backward (accumulate gradients)
         loss.backward()
         
-        total_loss += loss.item()
+        total_lm_loss += lm_loss.item()
         segment_count += 1
         
     # Validation / Verify gradients?
@@ -263,7 +293,11 @@ def train_step(model, batch, optimizer, config, epoch):
     optimizer.step()
     optimizer.zero_grad()
     
-    return {'loss': total_loss / segment_count}
+    return {
+        'loss': total_lm_loss / segment_count,
+        'act_loss': total_act_loss / max(segment_count - 1, 1),  # ACT loss starts from segment 2
+        'avg_p_halt': sum(halting_probs) / len(halting_probs) if halting_probs else 0,
+    }
 
 def train_main():
     print("Initializing Training...")

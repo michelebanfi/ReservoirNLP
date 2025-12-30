@@ -1,241 +1,511 @@
 [
     {
         "epoch": 1,
-        "loss": 2.6200999390363693,
+        "loss": 2.6205162044525148,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.05962781608104706,
+            "reasoning_gate_effective": -0.059557247906923294,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.6666666666666666,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 2,
-        "loss": 2.2134518726348875,
+        "loss": 2.2128004375696184,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.09214585274457932,
+            "reasoning_gate_effective": -0.09188593924045563,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.8095238095238094,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California"
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 3,
-        "loss": 1.9631836742639541,
+        "loss": 1.9643363936901093,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.09037154912948608,
+            "reasoning_gate_effective": -0.09012632817029953,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.8095238095238094,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 4,
-        "loss": 1.7945789389133453,
+        "loss": 1.7940266170024872,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08892480283975601,
+            "reasoning_gate_effective": -0.08869115263223648,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.6666666666666666,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 5,
-        "loss": 1.7104810137748718,
+        "loss": 1.7081613824129105,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08738604187965393,
+            "reasoning_gate_effective": -0.08716428279876709,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.3333333333333333,
+            "hrm_f1": 0.3333333333333333,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 6,
-        "loss": 1.6536491913557052,
+        "loss": 1.6544730803489685,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08613762259483337,
+            "reasoning_gate_effective": -0.08592521399259567,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.6666666666666666,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California"
+                "hrm": "Levi's Stadium",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 7,
-        "loss": 1.615909126996994,
+        "loss": 1.6161047619819642,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08416976034641266,
+            "reasoning_gate_effective": -0.08397156000137329,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.6666666666666666,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California"
+                "hrm": "Levi's Stadium",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 8,
-        "loss": 1.5862936759948731,
+        "loss": 1.587582494187355,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08288823068141937,
+            "reasoning_gate_effective": -0.08269892632961273,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.3333333333333333,
+            "hrm_f1": 0.3333333333333333,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 9,
-        "loss": 1.5646441395282746,
+        "loss": 1.5654913298130035,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08208057284355164,
+            "reasoning_gate_effective": -0.08189673721790314,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.8095238095238094,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Carolina Panthers",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     },
     {
         "epoch": 10,
-        "loss": 1.545379927945137,
+        "loss": 1.5470849198102952,
+        "model_metrics": {
+            "reasoning_gate_raw": -0.08008948713541031,
+            "reasoning_gate_effective": -0.07991869002580643,
+            "total_params_M": 286.520067,
+            "t5_params_M": 247.577856,
+            "hrm_params_M": 38.942211
+        },
+        "hrm_metrics": {
+            "avg_segments_used": 4.0,
+            "avg_q_halt": 0.11920291930437088,
+            "avg_q_continue": 0.5
+        },
+        "accuracy": {
+            "hrm_exact_match": 0.3333333333333333,
+            "hrm_f1": 0.4761904761904762,
+            "baseline_exact_match": 0.3333333333333333,
+            "baseline_f1": 0.3333333333333333
+        },
         "validation_samples": [
             {
                 "question": "Which NFL team represented the AFC at Super Bowl 50?",
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers"
+                "hrm": "Denver Broncos",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium"
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "segments_used": 4,
+                "q_halt": 0.11920291930437088,
+                "q_continue": 0.5
             }
         ]
     }

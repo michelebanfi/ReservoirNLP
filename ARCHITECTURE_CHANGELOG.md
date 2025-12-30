@@ -4,6 +4,31 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2025-12-30: ACT Loss & Training Improvements
+
+**Status**: Implemented
+
+### Problem
+Analysis of training metrics showed:
+- **Gate stuck negative** (~-0.08): Model was actively suppressing HRM
+- **Q-values frozen** (q_halt=0.119, q_continue=0.5): ACT not learning
+- **Segments always max** (4): Halting mechanism not working
+
+### Changes
+1. **ACT Loss**: Added explicit loss to train Q-head based on loss improvement
+   - If continuing improves loss → encourage p_continue
+   - If no improvement → encourage p_halt
+   - Weight: `ACT_LOSS_WEIGHT = 0.1`
+
+2. **Gate Initialization**: Changed from 0 → 0.1 (positive)
+   - Model now starts with ~10% HRM contribution
+   - Prevents immediate suppression
+
+3. **More Validation Samples**: Increased from 3 → 10
+   - `NUM_VAL_SAMPLES = 10` for stable accuracy metrics
+
+---
+
 ## [BUGFIX] 2025-12-29: Autoregressive Generation Token Duplication
 
 **Status**: Fixed
