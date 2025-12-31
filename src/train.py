@@ -56,48 +56,51 @@ def get_baseline_samples(tokenizer, config, num_samples=None):
     """
     Load Standard T5, generate answers for validation samples, then unload.
     Returns: list of dicts {question, context, target, baseline_answer, source}
-    Samples are drawn from all configured datasets for comprehensive evaluation.
+    Explicitly samples from EACH dataset to ensure balanced validation.
     """
     if num_samples is None:
         num_samples = config.NUM_VAL_SAMPLES
-    print(f"Generating T5 Baseline Answers for {num_samples} Validation Samples...")
+    
+    # Calculate samples per dataset (ensure we get from each)
+    samples_per_ds = max(1, num_samples // len(config.DATASETS))
+    
+    print(f"Generating T5 Baseline for {samples_per_ds} samples x {len(config.DATASETS)} datasets...")
     device = config.DEVICE
     
-    # 1. Get Samples from all datasets
-    _, val_loader = get_dataloaders(tokenizer, config)
-    # Get a batch (may contain multiple datasets)
-    batch = next(iter(val_loader))
+    # Import here to avoid circular import
+    from .dataset import UnifiedQADataset
     
     samples = []
     
-    # 2. Load T5 (Frozen/Eval)
+    # Load T5 (Frozen/Eval)
     t5_model = T5ForConditionalGeneration.from_pretrained(config.TOKENIZER_NAME).to(device)
     t5_model.eval()
     
     with torch.no_grad():
-        for i in range(min(num_samples, len(batch['input_ids']))):
-            input_ids = batch['input_ids'][i:i+1].to(device)
+        for dataset_name in config.DATASETS:
+            print(f"  Loading {dataset_name} validation samples...")
             
-            # Generate T5 Answer
-            gen_out = t5_model.generate(input_ids, max_new_tokens=64)
-            base_ans = tokenizer.decode(gen_out[0], skip_special_tokens=True)
+            # Load a few samples from this specific dataset
+            ds = UnifiedQADataset(tokenizer, dataset_name, 'validation', max_samples=samples_per_ds)
             
-            # Get Raw data
-            raw_q = batch['raw_question'][i]
-            raw_tgt = batch['raw_answer'][i]
-            source = batch['source'][i] if 'source' in batch else 'unknown'
-            difficulty = batch['difficulty'][i] if 'difficulty' in batch else 'unknown'
-            
-            samples.append({
-                'input_ids': input_ids,
-                'question': raw_q,
-                'target': raw_tgt,
-                'baseline': base_ans,
-                'source': source,
-                'difficulty': difficulty,
-            })
-            
-    print("Baseline Generated. Unloading T5...")
+            for i in range(min(samples_per_ds, len(ds))):
+                item = ds[i]
+                input_ids = item['input_ids'].unsqueeze(0).to(device)
+                
+                # Generate T5 Answer
+                gen_out = t5_model.generate(input_ids, max_new_tokens=64)
+                base_ans = tokenizer.decode(gen_out[0], skip_special_tokens=True)
+                
+                samples.append({
+                    'input_ids': input_ids,
+                    'question': item['raw_question'],
+                    'target': item['raw_answer'],
+                    'baseline': base_ans,
+                    'source': item['source'],
+                    'difficulty': item['difficulty'],
+                })
+    
+    print(f"Baseline Generated for {len(samples)} samples. Unloading T5...")
     del t5_model
     torch.cuda.empty_cache()
     return samples

@@ -12,6 +12,7 @@ class Config:
     N_HRM_LAYERS = 2       # Layers per module (H/L)
     N_REASONING_TOKENS = 4 # K: soft-prompt tokens pooled from zH
     REASONING_GATE_INIT = 0.5  # Initialize gate slightly positive to encourage HRM usage
+    FORCE_HRM = True  # If True, disable gate/skip connection (100% HRM, no bypass)
     
     # Deep Supervision & ACT (Graves 2016)
     MAX_SEGMENTS = 8       # M_max

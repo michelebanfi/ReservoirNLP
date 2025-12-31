@@ -58,10 +58,13 @@ class ReasoningPooler(nn.Module):
     """
     Pool zH [B, L, D] into K reasoning tokens [B, K, D] using cross-attention.
     These tokens serve as soft prompts that the decoder can attend to.
+    
+    If force_hrm=True, the gate is disabled and reasoning tokens are always at full strength.
     """
-    def __init__(self, dim, n_tokens, num_heads=8, dropout=0.1, gate_init=0.1):
+    def __init__(self, dim, n_tokens, num_heads=8, dropout=0.1, gate_init=0.1, force_hrm=False):
         super().__init__()
         self.n_tokens = n_tokens
+        self.force_hrm = force_hrm
         
         # Learned query tokens for pooling
         self.query_tokens = nn.Parameter(torch.randn(1, n_tokens, dim) * 0.02)
@@ -81,8 +84,8 @@ class ReasoningPooler(nn.Module):
         self.norm2 = RMSNorm(dim)
         self.dropout = nn.Dropout(dropout)
         
-        # Gating: initialize slightly positive to encourage HRM usage
-        # tanh(0.1) ≈ 0.1, so ~10% HRM contribution initially
+        # Gating: only used if force_hrm=False
+        # tanh(0.5) ≈ 0.46, so ~46% HRM contribution initially
         self.gate = nn.Parameter(torch.tensor([gate_init]))
         
     def forward(self, zH, key_padding_mask=None):
@@ -108,8 +111,11 @@ class ReasoningPooler(nn.Module):
         x = self.norm1(queries + self.dropout(attn_out))
         x = self.norm2(x + self.dropout(self.mlp(x)))
         
-        # Gate the reasoning contribution (starts at 0 = pure T5)
-        return torch.tanh(self.gate) * x
+        # If force_hrm, return full strength; otherwise gate the contribution
+        if self.force_hrm:
+            return x  # No gate, full HRM
+        else:
+            return torch.tanh(self.gate) * x
 
 class HRMTransformerBlock(nn.Module):
     def __init__(self, dim, num_heads, dropout=0.1):
@@ -245,7 +251,8 @@ class NanoHRMv3(nn.Module):
             n_tokens=config.N_REASONING_TOKENS,
             num_heads=config.N_HEADS,
             dropout=config.DROPOUT,
-            gate_init=config.REASONING_GATE_INIT
+            gate_init=config.REASONING_GATE_INIT,
+            force_hrm=getattr(config, 'FORCE_HRM', False)
         )
         
     def freeze_t5(self):

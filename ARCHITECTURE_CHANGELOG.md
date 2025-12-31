@@ -4,6 +4,34 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [BUGFIX/FEATURE] 2025-12-31: Force HRM Mode & Validation Fix
+
+**Status**: Implemented
+
+### Problems Fixed
+
+1. **Validation only testing SQuAD**: The `get_baseline_samples` function only grabbed one batch which contained only SQuAD samples. HotpotQA/DROP were never tested.
+
+2. **Gate collapse**: Reasoning gate kept dropping (0.43 → 0.26), causing HRM contribution to diminish and accuracy to degrade.
+
+### Changes
+
+1. **Fixed Validation Sampling** (`train.py`):
+   - Now explicitly loads samples from EACH dataset in `config.DATASETS`
+   - Ensures balanced representation (e.g., 3 samples × 3 datasets = 9 samples)
+
+2. **Added FORCE_HRM Mode** (`config.py`, `model.py`):
+   - New config: `FORCE_HRM = True`
+   - When True, the reasoning gate is bypassed entirely
+   - Reasoning tokens are always used at full strength (no skip connection)
+   - This forces the model to rely on HRM for all predictions
+
+### Rationale
+The gate was allowing the model to "cheat" by bypassing HRM and relying on the T5 baseline. By forcing HRM usage, we ensure the model must learn to use the reasoning mechanism effectively.
+
+---
+
+
 ## [IMPLEMENTED] 2025-12-31: Multi-Hop Dataset Integration
 
 **Status**: Implemented
