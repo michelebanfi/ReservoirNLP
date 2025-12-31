@@ -13,10 +13,10 @@ class Config:
     N_REASONING_TOKENS = 4 # K: soft-prompt tokens pooled from zH
     REASONING_GATE_INIT = 0.5  # Initialize gate slightly positive to encourage HRM usage
     
-    # Deep Supervision & ACT
+    # Deep Supervision & ACT (Graves 2016)
     MAX_SEGMENTS = 8       # M_max
-    MIN_SEGMENTS_PROB = 0.1
-    ACT_LOSS_WEIGHT = 1.0  # Weight for ACT halting loss
+    ACT_EPSILON = 0.01     # Halt when cumulative prob within epsilon of 1
+    ACT_PONDER_COST_TAU = 0.01  # Ponder cost regularizer weight
     NUM_VAL_SAMPLES = 10   # Number of validation samples for stable metrics
     
     # Training
@@ -24,7 +24,7 @@ class Config:
     BATCH_SIZE = 16
     LEARNING_RATE = 1e-4
     WEIGHT_DECAY = 0.01    # Adjusted standard value
-    EPOCHS = 10
+    EPOCHS = 20
     THINKING_WARMUP_EPOCHS = 2
     GRADIENT_CLIP = 1.0
     

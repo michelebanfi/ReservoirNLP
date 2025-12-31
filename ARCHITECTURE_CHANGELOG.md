@@ -4,6 +4,48 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2025-12-31: Proper ACT Implementation (Graves 2016)
+
+**Status**: Implemented
+
+### Problem
+Previous ACT implementation had issues:
+- **Hard threshold halting**: Used `if p_halt > 0.5: break` instead of proper cumulative probability
+- **No weighted output**: Used last state instead of weighted combination of all states
+- **Weak loss signal**: ACT loss based on loss improvement was noisy and ineffective
+- **Halting oscillating**: `avg_segments_used` would flip between 2 and 4 randomly
+
+### Changes (Based on arXiv:1603.08983)
+
+1. **Cumulative Halting Probabilities**:
+   - At each step, accumulate `p_halt` until total reaches ~1.0
+   - Stop when `1.0 - cumulative < epsilon` (ACT_EPSILON = 0.01)
+   - Allows smooth, differentiable halting decisions
+
+2. **Weighted State Combination**:
+   - Each intermediate state `zH_m` is weighted by its halting contribution
+   - Final state: `final_zH = Σ(normalized_weight_m * zH_m)`
+   - Provides smooth gradient flow through all reasoning steps
+
+3. **Ponder Cost Regularizer**:
+   - `ρ = N + R` where N = steps taken, R = remainder probability
+   - ACT loss: `tau * ponder_cost` (ACT_PONDER_COST_TAU = 0.01)
+   - Gently encourages model to minimize computation
+
+4. **Configuration Updates**:
+   - `EPOCHS = 20` (increased from 10 for complex reasoning task)
+   - Removed old ACT_LOSS_WEIGHT and MIN_SEGMENTS_PROB
+   - Added ACT_EPSILON and ACT_PONDER_COST_TAU
+
+### Expected Benefits
+- Model learns *when* to halt based on task difficulty
+- Smoother gradient flow through reasoning steps
+- Reduced oscillation in segments used
+- Better compute efficiency over time
+
+---
+
+
 ## [IMPLEMENTED] 2025-12-30: ACT Loss & Training Improvements
 
 **Status**: Implemented

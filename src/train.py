@@ -132,26 +132,57 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             B, L, D = memory.shape
             zH, zL = model.hrm_core.init_state(B, L, device)
             
-            # Run HRM reasoning with ACT
+            # Run HRM reasoning with proper ACT (Graves 2016)
+            # Accumulate halting probabilities until they sum to ~1
+            cumulative_halt = 0.0
+            epsilon = 0.01
             segments_used = 0
-            final_q_halt = 0.0
-            final_q_continue = 0.0
+            halting_weights = []
+            zH_states = []
             
-            for m in range(4):  # Max segments
+            for m in range(4):  # Max segments during inference
                 zH, zL = model.hrm_core.forward_segment(zH, zL, memory, key_padding_mask=src_mask)
-                q_val = model.hrm_core.get_q_values(zH)
-                final_q_halt = q_val[0, 0].item()
-                final_q_continue = 1.0 - final_q_halt
+                p_halt = model.hrm_core.get_q_values(zH)[0, 0].item()  # Scalar
+                
+                remainder = 1.0 - cumulative_halt
                 segments_used = m + 1
                 
-                if final_q_halt > 0.5 and m >= 1:
+                if remainder < epsilon:
+                    # Already used all probability budget
                     break
+                
+                # Clamp p_halt to not exceed remainder
+                effective_halt = min(p_halt, remainder)
+                cumulative_halt += effective_halt
+                
+                halting_weights.append(effective_halt)
+                zH_states.append(zH.clone())
+                
+                # Stop if we've accumulated enough probability
+                if cumulative_halt >= 1.0 - epsilon:
+                    break
+            
+            # Compute weighted combination of states (proper ACT output)
+            if halting_weights:
+                # Normalize weights to sum to 1
+                weight_sum = sum(halting_weights)
+                if weight_sum > 0:
+                    normalized_weights = [w / weight_sum for w in halting_weights]
+                    final_zH = sum(w * s for w, s in zip(normalized_weights, zH_states))
+                else:
+                    final_zH = zH_states[-1]
+            else:
+                final_zH = zH
+            
+            # Record metrics (use last step's p_halt for display)
+            final_q_halt = p_halt
+            final_q_continue = 1.0 - p_halt
             
             all_segments_used.append(segments_used)
             all_q_halt.append(final_q_halt)
             all_q_continue.append(final_q_continue)
             
-            enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(memory, zH, src_mask)
+            enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(memory, final_zH, src_mask)
             
             # Generate answer
             decoder_input = torch.tensor([[0]], device=device)
@@ -211,6 +242,12 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
     return results, hrm_metrics, accuracy_metrics
 
 def train_step(model, batch, optimizer, config, epoch):
+    """
+    Training step with proper ACT (Graves 2016):
+    - Accumulate halting probabilities until they sum to ~1
+    - Weight intermediate states by halting probability
+    - Add ponder cost regularizer to encourage efficiency
+    """
     device = config.DEVICE
     input_ids = batch['input_ids'].to(device)
     labels = batch['labels'].to(device)
@@ -222,80 +259,103 @@ def train_step(model, batch, optimizer, config, epoch):
     zH, zL = model.hrm_core.init_state(B, L, device)
     
     M_max = config.MAX_SEGMENTS
-    total_lm_loss = 0
-    total_act_loss = 0
-    segment_count = 0
+    epsilon = config.ACT_EPSILON
+    tau = config.ACT_PONDER_COST_TAU
     
-    prev_loss = None
-    halting_probs = []
+    # ACT state tracking (per batch element)
+    cumulative_halt = torch.zeros(B, device=device)  # [B]
+    halting_weights = []  # List of [B] tensors
+    zH_states = []  # List of [B, L, D] tensors
+    lm_losses = []  # LM loss at each step (for weighted combination)
+    
+    halting_probs_log = []  # For logging
+    steps_taken = torch.zeros(B, device=device)  # Track steps per sample
     
     for m in range(M_max):
         zH_in = zH.detach()
         zL_in = zL.detach()
         
-        # Encoder 1-step gradient approximation
+        # 1-step gradient approximation for memory
         if m == 0:
             current_memory = memory
         else:
             current_memory = memory.detach()
         
+        # Forward HRM segment
         zH, zL = model.hrm_core.forward_segment(zH_in, zL_in, current_memory, key_padding_mask=src_mask)
         
-        # Get Q-values for ACT loss
-        q_val = model.hrm_core.get_q_values(zH)  # [B, 1] - sigmoid output
-        p_halt = q_val.squeeze(-1)  # [B]
-        halting_probs.append(p_halt.mean().item())
+        # Get halting probability [B, 1] -> [B]
+        p_halt = model.hrm_core.get_q_values(zH).squeeze(-1)
+        halting_probs_log.append(p_halt.mean().item())
         
-        # Decode and compute LM loss
+        # Compute remainder (how much probability budget left)
+        remainder = 1.0 - cumulative_halt  # [B]
+        
+        # Mask: which samples are still active (haven't halted yet)
+        active_mask = (remainder > epsilon).float()  # [B]
+        
+        # Clamp p_halt to not exceed remainder
+        effective_halt = torch.min(p_halt, remainder) * active_mask  # [B]
+        
+        # Accumulate halting probability
+        cumulative_halt = cumulative_halt + effective_halt
+        
+        # Track steps
+        steps_taken = steps_taken + active_mask
+        
+        # Store weighted state
+        halting_weights.append(effective_halt)
+        zH_states.append(zH)
+        
+        # Compute LM loss for this step
         enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(current_memory, zH, src_mask)
         logits = model.decode(enhanced_memory, labels, enhanced_mask)
-        lm_loss = compute_loss(logits, labels)
+        step_lm_loss = compute_loss(logits, labels)
+        lm_losses.append(step_lm_loss)
         
-        # ============== ACT Loss ==============
-        # Idea: If continuing would improve loss, encourage p_continue
-        #       If loss is not improving, encourage p_halt
-        # We use the improvement ratio as a soft target
-        
-        if prev_loss is not None:
-            # Improvement: positive if loss decreased
-            improvement = (prev_loss - lm_loss.item())
-            
-            # Target: halt if improvement < threshold, continue if improvement > threshold
-            # Use sigmoid to create soft targets
-            threshold = 0.01  # Halt if improvement < 1%
-            
-            # Target p_halt: high if no improvement, low if improving
-            # Scale improvement to reasonable range
-            target_halt = torch.sigmoid(torch.tensor(-improvement * 10, device=device))
-            
-            # ACT loss: encourage Q-head outputs to match targets
-            # Binary cross-entropy for each head
-            act_loss = F.binary_cross_entropy(p_halt.mean(), target_halt)
-            total_act_loss += act_loss.item()
-            
-            # Combined loss
-            act_weight = config.ACT_LOSS_WEIGHT if hasattr(config, 'ACT_LOSS_WEIGHT') else 0.1
-            loss = lm_loss + act_weight * act_loss
-        else:
-            loss = lm_loss
-        
-        prev_loss = lm_loss.item()
-        
-        # Backward (accumulate gradients)
-        loss.backward()
-        
-        total_lm_loss += lm_loss.item()
-        segment_count += 1
-        
-    # Validation / Verify gradients?
+        # Check if all samples have halted
+        if (remainder <= epsilon).all():
+            break
+    
+    # ============== Combine States (Weighted Average) ==============
+    # Stack weights: [M, B] -> normalize to sum to 1 per sample
+    weight_stack = torch.stack(halting_weights, dim=0)  # [M, B]
+    weight_sum = weight_stack.sum(dim=0, keepdim=True).clamp(min=1e-8)  # [1, B]
+    normalized_weights = weight_stack / weight_sum  # [M, B]
+    
+    # Weighted sum of states: sum over M of weight * state
+    # zH_states: list of [B, L, D], normalized_weights: [M, B]
+    final_zH = torch.zeros_like(zH_states[0])
+    for w, s in zip(normalized_weights, zH_states):
+        # w: [B], s: [B, L, D] -> expand w to [B, 1, 1] for broadcasting
+        final_zH = final_zH + w.unsqueeze(-1).unsqueeze(-1) * s
+    
+    # ============== Final LM Loss (on combined state) ==============
+    enhanced_memory, enhanced_mask = model.prepare_enhanced_memory(memory, final_zH, src_mask)
+    logits = model.decode(enhanced_memory, labels, enhanced_mask)
+    final_lm_loss = compute_loss(logits, labels)
+    
+    # ============== Ponder Cost (Graves 2016) ==============
+    # ρ = N + R where N = number of steps, R = remainder (1 - cumulative)
+    # This encourages the model to halt quickly
+    ponder_cost = steps_taken.mean() + (1.0 - cumulative_halt).mean()
+    act_loss = tau * ponder_cost
+    
+    # ============== Total Loss ==============
+    total_loss = final_lm_loss + act_loss
+    
+    # Backward
+    total_loss.backward()
+    
     nn.utils.clip_grad_norm_(model.parameters(), config.GRADIENT_CLIP)
     optimizer.step()
     optimizer.zero_grad()
     
     return {
-        'loss': total_lm_loss / segment_count,
-        'act_loss': total_act_loss / max(segment_count - 1, 1),  # ACT loss starts from segment 2
-        'avg_p_halt': sum(halting_probs) / len(halting_probs) if halting_probs else 0,
+        'loss': final_lm_loss.item(),
+        'ponder': ponder_cost.item(),
+        'avg_p_halt': sum(halting_probs_log) / len(halting_probs_log) if halting_probs_log else 0,
+        'avg_steps': steps_taken.mean().item(),
     }
 
 def train_main():
