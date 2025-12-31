@@ -55,17 +55,18 @@ def compute_f1(prediction, target):
 def get_baseline_samples(tokenizer, config, num_samples=None):
     """
     Load Standard T5, generate answers for validation samples, then unload.
-    Returns: list of dicts {question, context, target, baseline_answer}
+    Returns: list of dicts {question, context, target, baseline_answer, source}
+    Samples are drawn from all configured datasets for comprehensive evaluation.
     """
     if num_samples is None:
         num_samples = config.NUM_VAL_SAMPLES
     print(f"Generating T5 Baseline Answers for {num_samples} Validation Samples...")
     device = config.DEVICE
     
-    # 1. Get Samples
+    # 1. Get Samples from all datasets
     _, val_loader = get_dataloaders(tokenizer, config)
-    # Get a batch
-    batch = next(iter(val_loader)) # assuming batch size >= num_samples
+    # Get a batch (may contain multiple datasets)
+    batch = next(iter(val_loader))
     
     samples = []
     
@@ -76,23 +77,24 @@ def get_baseline_samples(tokenizer, config, num_samples=None):
     with torch.no_grad():
         for i in range(min(num_samples, len(batch['input_ids']))):
             input_ids = batch['input_ids'][i:i+1].to(device)
-            target_ids = batch['labels'][i:i+1] # contains -100
             
             # Generate T5 Answer
-            gen_out = t5_model.generate(input_ids, max_new_tokens=32)
+            gen_out = t5_model.generate(input_ids, max_new_tokens=64)
             base_ans = tokenizer.decode(gen_out[0], skip_special_tokens=True)
             
-            # Get Raw
+            # Get Raw data
             raw_q = batch['raw_question'][i]
-            # reconstruct target text roughly or use raw_answer if available (dataset.py provided it)
             raw_tgt = batch['raw_answer'][i]
-            context = "" # Not easily accessible unless we carry it. Dataset puts it in text.
+            source = batch['source'][i] if 'source' in batch else 'unknown'
+            difficulty = batch['difficulty'][i] if 'difficulty' in batch else 'unknown'
             
             samples.append({
                 'input_ids': input_ids,
                 'question': raw_q,
                 'target': raw_tgt,
-                'baseline': base_ans
+                'baseline': base_ans,
+                'source': source,
+                'difficulty': difficulty,
             })
             
     print("Baseline Generated. Unloading T5...")
@@ -104,17 +106,18 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
     """
     Run HRM on the samples, collect metrics, and print comparison table.
     Returns: (validation_samples, hrm_metrics, accuracy_metrics)
+    Now includes per-dataset tracking for multi-hop analysis.
     """
     model.eval()
     device = next(model.parameters()).device
     
     print(f"\n\n=== Validation Comparison (Epoch {epoch+1}) ===")
-    print(f"{'Question':<50} | {'Target':<30} | {'T5 Baseline':<30} | {'HRM':<30}")
-    print("-" * 150)
+    print(f"{'Source':<10} | {'Question':<40} | {'Target':<25} | {'T5':<25} | {'HRM':<25} | {'Segs':<4}")
+    print("-" * 140)
     
     results = []
     
-    # Metrics accumulators
+    # Metrics accumulators (overall and per-dataset)
     all_segments_used = []
     all_q_halt = []
     all_q_continue = []
@@ -123,9 +126,20 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
     baseline_exact_matches = []
     baseline_f1_scores = []
     
+    # Per-dataset tracking
+    per_dataset_metrics = {}
+    
     with torch.no_grad():
         for s in samples:
             input_ids = s['input_ids'].to(device)
+            source = s.get('source', 'unknown')
+            
+            # Initialize per-dataset tracking if needed
+            if source not in per_dataset_metrics:
+                per_dataset_metrics[source] = {
+                    'segments': [], 'hrm_em': [], 'hrm_f1': [],
+                    'baseline_em': [], 'baseline_f1': []
+                }
             
             # Encode
             memory, src_mask = model.encode(input_ids)
@@ -133,7 +147,6 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             zH, zL = model.hrm_core.init_state(B, L, device)
             
             # Run HRM reasoning with proper ACT (Graves 2016)
-            # Accumulate halting probabilities until they sum to ~1
             cumulative_halt = 0.0
             epsilon = 0.01
             segments_used = 0
@@ -142,39 +155,34 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             
             for m in range(4):  # Max segments during inference
                 zH, zL = model.hrm_core.forward_segment(zH, zL, memory, key_padding_mask=src_mask)
-                p_halt = model.hrm_core.get_q_values(zH)[0, 0].item()  # Scalar
+                p_halt = model.hrm_core.get_q_values(zH)[0, 0].item()
                 
                 remainder = 1.0 - cumulative_halt
                 segments_used = m + 1
                 
                 if remainder < epsilon:
-                    # Already used all probability budget
                     break
                 
-                # Clamp p_halt to not exceed remainder
                 effective_halt = min(p_halt, remainder)
                 cumulative_halt += effective_halt
                 
                 halting_weights.append(effective_halt)
                 zH_states.append(zH.clone())
                 
-                # Stop if we've accumulated enough probability
                 if cumulative_halt >= 1.0 - epsilon:
                     break
             
-            # Compute weighted combination of states (proper ACT output)
+            # Compute weighted combination of states
             if halting_weights:
-                # Normalize weights to sum to 1
                 weight_sum = sum(halting_weights)
                 if weight_sum > 0:
                     normalized_weights = [w / weight_sum for w in halting_weights]
-                    final_zH = sum(w * s for w, s in zip(normalized_weights, zH_states))
+                    final_zH = sum(w * st for w, st in zip(normalized_weights, zH_states))
                 else:
                     final_zH = zH_states[-1]
             else:
                 final_zH = zH
             
-            # Record metrics (use last step's p_halt for display)
             final_q_halt = p_halt
             final_q_continue = 1.0 - p_halt
             
@@ -187,7 +195,7 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             # Generate answer
             decoder_input = torch.tensor([[0]], device=device)
             gen_toks = []
-            for _ in range(32):
+            for _ in range(64):  # Increased for longer answers
                 logits = model.generate_step(enhanced_memory, decoder_input, enhanced_mask)
                 next_tok = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
                 if next_tok.item() == 1: break
@@ -200,18 +208,30 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
             target = s['target']
             baseline = s['baseline']
             
-            hrm_exact_matches.append(compute_exact_match(hrm_ans, target))
-            hrm_f1_scores.append(compute_f1(hrm_ans, target))
-            baseline_exact_matches.append(compute_exact_match(baseline, target))
-            baseline_f1_scores.append(compute_f1(baseline, target))
+            hrm_em = compute_exact_match(hrm_ans, target)
+            hrm_f1 = compute_f1(hrm_ans, target)
+            base_em = compute_exact_match(baseline, target)
+            base_f1 = compute_f1(baseline, target)
             
-            # Display
-            q_disp = (s['question'][:47] + '..') if len(s['question']) > 47 else s['question']
-            t_disp = (target[:27] + '..') if len(target) > 27 else target
-            b_disp = (baseline[:27] + '..') if len(baseline) > 27 else baseline
-            h_disp = (hrm_ans[:27] + '..') if len(hrm_ans) > 27 else hrm_ans
+            hrm_exact_matches.append(hrm_em)
+            hrm_f1_scores.append(hrm_f1)
+            baseline_exact_matches.append(base_em)
+            baseline_f1_scores.append(base_f1)
             
-            print(f"{q_disp:<50} | {t_disp:<30} | {b_disp:<30} | {h_disp:<30}")
+            # Track per-dataset
+            per_dataset_metrics[source]['segments'].append(segments_used)
+            per_dataset_metrics[source]['hrm_em'].append(hrm_em)
+            per_dataset_metrics[source]['hrm_f1'].append(hrm_f1)
+            per_dataset_metrics[source]['baseline_em'].append(base_em)
+            per_dataset_metrics[source]['baseline_f1'].append(base_f1)
+            
+            # Display (compact format)
+            q_disp = (s['question'][:37] + '..') if len(s['question']) > 37 else s['question']
+            t_disp = (target[:22] + '..') if len(target) > 22 else target
+            b_disp = (baseline[:22] + '..') if len(baseline) > 22 else baseline
+            h_disp = (hrm_ans[:22] + '..') if len(hrm_ans) > 22 else hrm_ans
+            
+            print(f"{source:<10} | {q_disp:<40} | {t_disp:<25} | {b_disp:<25} | {h_disp:<25} | {segments_used:<4}")
             
             results.append({
                 'question': s['question'],
@@ -221,15 +241,26 @@ def run_validation_comparison(model, tokenizer, samples, epoch):
                 'segments_used': segments_used,
                 'q_halt': final_q_halt,
                 'q_continue': final_q_continue,
+                'source': source,
             })
             
-    print("-" * 150 + "\n")
+    print("-" * 140)
+    
+    # Print per-dataset summary
+    print("\n=== Per-Dataset Summary ===")
+    for ds_name, metrics in per_dataset_metrics.items():
+        avg_segs = sum(metrics['segments']) / len(metrics['segments']) if metrics['segments'] else 0
+        avg_hrm_em = sum(metrics['hrm_em']) / len(metrics['hrm_em']) if metrics['hrm_em'] else 0
+        avg_base_em = sum(metrics['baseline_em']) / len(metrics['baseline_em']) if metrics['baseline_em'] else 0
+        print(f"  {ds_name}: Segs={avg_segs:.1f}, HRM_EM={avg_hrm_em:.0%}, Baseline_EM={avg_base_em:.0%}")
+    print()
     
     # Aggregate metrics
     hrm_metrics = {
         'avg_segments_used': sum(all_segments_used) / len(all_segments_used),
         'avg_q_halt': sum(all_q_halt) / len(all_q_halt),
         'avg_q_continue': sum(all_q_continue) / len(all_q_continue),
+        'per_dataset': {k: sum(v['segments'])/len(v['segments']) for k, v in per_dataset_metrics.items()},
     }
     
     accuracy_metrics = {

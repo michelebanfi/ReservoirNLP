@@ -16,7 +16,7 @@ class Config:
     # Deep Supervision & ACT (Graves 2016)
     MAX_SEGMENTS = 8       # M_max
     ACT_EPSILON = 0.01     # Halt when cumulative prob within epsilon of 1
-    ACT_PONDER_COST_TAU = 0.01  # Ponder cost regularizer weight
+    ACT_PONDER_COST_TAU = 0.001  # Ponder cost regularizer weight (reduced for multi-hop)
     NUM_VAL_SAMPLES = 10   # Number of validation samples for stable metrics
     
     # Training
@@ -29,10 +29,10 @@ class Config:
     GRADIENT_CLIP = 1.0
     
     # Data
-    MAX_SRC_LEN = 256
-    MAX_TGT_LEN = 32
-    TRAIN_SIZE = 10000
-    VAL_SIZE = 1000
+    MAX_SRC_LEN = 512      # Increased for longer multi-hop contexts
+    MAX_TGT_LEN = 64       # Increased for longer answers
+    SAMPLES_PER_DATASET = 5000  # Equal sampling from each dataset
+    DATASETS = ['squad', 'hotpotqa', 'drop']  # Multi-hop reasoning datasets
     
     TOKENIZER_NAME = "google/flan-t5-base"
     

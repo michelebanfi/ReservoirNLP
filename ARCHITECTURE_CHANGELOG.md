@@ -4,6 +4,43 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2025-12-31: Multi-Hop Dataset Integration
+
+**Status**: Implemented
+
+### Motivation
+Previous training showed ACT halting very quickly (1 segment) on simple SQuAD questions. To properly exercise the multi-step reasoning capability, we need harder datasets that require genuine reasoning.
+
+### Changes
+
+1. **New Datasets Added**:
+   - **HotpotQA** (distractor): Multi-hop reasoning, comparison and bridge questions
+   - **DROP**: Discrete reasoning, arithmetic over text
+   - **SQuAD**: Retained as baseline extractive QA
+
+2. **Unified Dataset Loader** (`dataset.py`):
+   - `UnifiedQADataset` class normalizes column names across datasets
+   - Tracks `source` and `difficulty` per sample
+   - Balanced sampling: 5000 samples per dataset
+
+3. **ACT Tuning** (`config.py`):
+   - `ACT_PONDER_COST_TAU`: 0.01 → 0.001 (allow more reasoning steps)
+   - `MAX_SRC_LEN`: 256 → 512 (longer multi-hop contexts)
+   - `MAX_TGT_LEN`: 32 → 64 (longer answers)
+
+4. **Per-Dataset Metrics** (`train.py`):
+   - Validation now shows source dataset for each sample
+   - Prints per-dataset summary (avg segments, accuracy)
+   - Logs `per_dataset` segments in metrics.json
+
+### Expected Behavior
+- SQuAD: ~1-2 segments (quick, extractive)
+- HotpotQA/DROP: ~2-4 segments (more reasoning needed)
+- ACT should learn to spend more compute on harder questions
+
+---
+
+
 ## [IMPLEMENTED] 2025-12-31: Proper ACT Implementation (Graves 2016)
 
 **Status**: Implemented
