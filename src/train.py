@@ -381,6 +381,17 @@ def train_step(model, batch, optimizer, config, epoch):
     # Backward
     total_loss.backward()
     
+    # Optional gradient monitoring (enable via DEBUG_GRADIENTS=True in config)
+    grad_info = {}
+    if getattr(config, 'DEBUG_GRADIENTS', False):
+        q_grad = model.hrm_core.q_head.weight.grad
+        h_param = list(model.hrm_core.H_module.parameters())[0]
+        grad_info = {
+            'q_head_grad': q_grad.abs().mean().item() if q_grad is not None else 0,
+            'h_module_grad': h_param.grad.abs().mean().item() if h_param.grad is not None else 0,
+        }
+        print(f"  [GRAD] Q-head: {grad_info['q_head_grad']:.6f}, H-module: {grad_info['h_module_grad']:.6f}")
+    
     nn.utils.clip_grad_norm_(model.parameters(), config.GRADIENT_CLIP)
     optimizer.step()
     optimizer.zero_grad()

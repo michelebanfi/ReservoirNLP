@@ -7,8 +7,8 @@ class Config:
     N_HEADS = 12
     
     # HRM Architecture
-    N_HIGH_CYCLES = 2      # N: H-module updates per segment
-    N_LOW_STEPS = 4        # T: L-module updates per H-cycle
+    N_HIGH_CYCLES = 1      # N: H-module updates per segment (reduced for gradient flow)
+    N_LOW_STEPS = 2        # T: L-module updates per H-cycle (reduced for gradient flow)
     N_HRM_LAYERS = 2       # Layers per module (H/L)
     N_REASONING_TOKENS = 4 # K: soft-prompt tokens pooled from zH
     REASONING_GATE_INIT = 0.5  # Initialize gate slightly positive to encourage HRM usage
@@ -17,8 +17,9 @@ class Config:
     # Deep Supervision & ACT (Graves 2016)
     MAX_SEGMENTS = 8       # M_max
     ACT_EPSILON = 0.01     # Halt when cumulative prob within epsilon of 1
-    ACT_PONDER_COST_TAU = 0.001  # Ponder cost regularizer weight (reduced for multi-hop)
-    NUM_VAL_SAMPLES = 10   # Number of validation samples for stable metrics
+    ACT_PONDER_COST_TAU = 0.1    # Ponder cost regularizer weight (100x stronger for learning)
+    Q_HEAD_BIAS_INIT = -2.0      # Init Q-head bias: sigmoid(-2)≈0.12 = encourage continuing
+    NUM_VAL_SAMPLES = 50   # Number of validation samples for stable metrics
     
     # Training
     DROPOUT = 0.1

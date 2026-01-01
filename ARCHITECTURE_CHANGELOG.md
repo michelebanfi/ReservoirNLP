@@ -4,6 +4,82 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2026-01-01: Critical Fixes - Gradient Flow & ACT Mechanism
+
+**Status**: Implemented
+
+### Problems Fixed
+
+Analysis of 12 epochs of training revealed three critical issues:
+
+1. **Gradient Starvation**: With N=2, T=4 (8 steps), only the final step received gradients due to `torch.no_grad()` block. HRM learned from only 12.5% of computation.
+
+2. **ACT Stuck at 2 Segments**: Q-head initialized to 0 → sigmoid(0)=0.5. After 2 steps cumulative_halt reached 1.0, causing immediate halt regardless of task difficulty.
+
+3. **Weak ACT Loss Signal**: τ=0.001 resulted in negligible ACT loss (~0.002) vs LM loss (~1.8), preventing Q-head learning.
+
+4. **Small Validation Set**: Only 9 samples caused high variance in accuracy metrics.
+
+### Changes
+
+1. **Full Gradient Flow** (`model.py`):
+   - Reduced `N_HIGH_CYCLES=1, N_LOW_STEPS=2` (total 2 steps from 8)
+   - Removed `torch.no_grad()` block entirely
+   - All HRM reasoning steps now receive gradients
+
+2. **ACT Parameter Fixes** (`config.py`):
+   - `ACT_PONDER_COST_TAU`: 0.001 → 0.1 (100x stronger)
+   - `Q_HEAD_BIAS_INIT`: 0.0 → -2.0 (sigmoid(-2)≈0.12 = encourage continuing)
+   - Now Q-head learns WHEN to halt instead of halting by default
+
+3. **Validation Improvement** (`config.py`):
+   - `NUM_VAL_SAMPLES`: 10 → 50 (more stable accuracy metrics)
+
+4. **Gradient Monitoring** (`train.py`):
+   - Added optional `DEBUG_GRADIENTS` flag to monitor Q-head and H-module gradient flow
+
+### Expected Behavior
+- HRM should receive meaningful gradients and learn effectively
+- ACT should initially use 3-8 segments, then learn to optimize
+- More segments for HotpotQA/DROP (multi-hop) than SQuAD (extractive)
+- Validation accuracy should be more stable and ≥ baseline
+
+---
+
+## [PROPOSAL] Training HRM From Scratch (Future Experiment)
+
+**Status**: Not yet implemented - proposed for future exploration
+
+### Motivation
+Current approach integrates HRM with pretrained T5, which may cause conflicts between:
+- T5's learned attention patterns vs HRM's reasoning tokens
+- Pretrained decoder expectations vs HRM-enhanced memory
+
+### Proposed Staged Approach
+
+```
+Stage 1: Train small encoder-only LM (~10M params) on WikiText masked LM
+Stage 2: Add HRM module, train on sentence completion (requires reasoning)
+Stage 3: Add decoder, fine-tune on QA datasets
+```
+
+### Benefits
+- HRM co-evolves with encoder from start (no pretrained bias)
+- Unified architecture without adaptation layers
+- Curriculum flexibility: language first, reasoning second
+
+### Challenges
+- Requires significant compute and training time
+- Need to balance language learning vs reasoning learning
+- May need custom datasets for Stage 2 (reasoning-focused completion)
+
+### Implementation Notes (for when this is implemented)
+- Consider starting with ~50M parameter model (smaller than T5-Base)
+- Use gradient accumulation to simulate larger batches
+- Track both perplexity (language) and reasoning metrics separately
+
+---
+
 ## [BUGFIX/FEATURE] 2025-12-31: Force HRM Mode & Validation Fix
 
 **Status**: Implemented

@@ -186,7 +186,9 @@ class HierarchicalReasoningCore(nn.Module):
         self.q_head = nn.Linear(dim, 1, bias=True)
         with torch.no_grad():
             self.q_head.weight.zero_()
-            self.q_head.bias.data = torch.tensor([0.0]) # Init to 0.5 probability
+            # Use config bias: sigmoid(-2)≈0.12 encourages continuing, learns to halt
+            q_bias = getattr(config, 'Q_HEAD_BIAS_INIT', 0.0)
+            self.q_head.bias.data = torch.tensor([q_bias])
         
         self.zH_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         self.zL_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
@@ -197,26 +199,23 @@ class HierarchicalReasoningCore(nn.Module):
         return zH.to(device), zL.to(device)
     
     def forward_segment(self, zH, zL, x, key_padding_mask=None):
+        """
+        Forward one reasoning segment through H/L modules.
+        With reduced N=1, T=2 (total 2 steps), we now allow gradients through all steps.
+        """
         N, T = self.N, self.T
         total_steps = N * T
         
-        # 1-step gradient approximation
-        with torch.no_grad():
-            for i in range(total_steps - 1):
-                # Add PE to zL before processing to reinforce order
-                zL_pe = self.pos_encoder(zL) 
-                # Note: inputs to L_module are (state, contexts). 
-                # We should pass zL_pe as state? 
-                # HRMModule forwards state through transformer blocks.
-                zL = self.L_module(zL_pe, [zH, x], key_padding_mask=key_padding_mask)
-                
-                if (i + 1) % T == 0:
-                     # Add PE to zH
-                    zH_pe = self.pos_encoder(zH)
-                    zH = self.H_module(zH_pe, [zL], key_padding_mask=key_padding_mask)
-        
-        zL = self.L_module(self.pos_encoder(zL), [zH.detach(), x], key_padding_mask=key_padding_mask) 
-        zH = self.H_module(self.pos_encoder(zH), [zL], key_padding_mask=key_padding_mask)
+        # Full gradient flow through all reasoning steps (enabled with reduced N*T=2)
+        for i in range(total_steps):
+            # Add PE to zL before processing to reinforce order
+            zL_pe = self.pos_encoder(zL) 
+            zL = self.L_module(zL_pe, [zH, x], key_padding_mask=key_padding_mask)
+            
+            if (i + 1) % T == 0:
+                # Add PE to zH
+                zH_pe = self.pos_encoder(zH)
+                zH = self.H_module(zH_pe, [zL], key_padding_mask=key_padding_mask)
         
         return zH, zL
     
