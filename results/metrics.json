@@ -1,27 +1,29 @@
 [
     {
         "epoch": 1,
-        "loss": 2.8902237641531774,
+        "loss": 3.7285224837280793,
         "model_metrics": {
-            "reasoning_gate_raw": 0.4590945541858673,
-            "reasoning_gate_effective": 0.4293459951877594,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 2.0,
-            "avg_q_halt": 0.9356362462043762,
-            "avg_q_continue": 0.06436375379562378,
+            "avg_q_halt": 0.746500121222602,
+            "avg_q_continue": 0.253499878777398,
             "per_dataset": {
-                "squad": 2.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.7,
-            "hrm_f1": 0.7,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.6666666666666666,
+            "hrm_f1": 0.7142857142857143,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -30,8 +32,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 2,
-                "q_halt": 0.9357529878616333,
-                "q_continue": 0.0642470121383667,
+                "q_halt": 0.7464917302131653,
+                "q_continue": 0.2535082697868347,
                 "source": "squad"
             },
             {
@@ -40,115 +42,107 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
                 "segments_used": 2,
-                "q_halt": 0.9357548356056213,
-                "q_continue": 0.06424516439437866,
+                "q_halt": 0.7464917302131653,
+                "q_continue": 0.2535082697868347,
                 "source": "squad"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
                 "segments_used": 2,
-                "q_halt": 0.9355581402778625,
-                "q_continue": 0.06444185972213745,
+                "q_halt": 0.746492862701416,
+                "q_continue": 0.253507137298584,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "American",
                 "segments_used": 2,
-                "q_halt": 0.9355592727661133,
-                "q_continue": 0.06444072723388672,
-                "source": "squad"
+                "q_halt": 0.7465209364891052,
+                "q_continue": 0.2534790635108948,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
                 "segments_used": 2,
-                "q_halt": 0.9358876347541809,
-                "q_continue": 0.06411236524581909,
-                "source": "squad"
+                "q_halt": 0.7465214729309082,
+                "q_continue": 0.2534785270690918,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "\"Animorphs\"\"",
                 "segments_used": 2,
-                "q_halt": 0.9356040358543396,
-                "q_continue": 0.0643959641456604,
-                "source": "squad"
+                "q_halt": 0.7465214133262634,
+                "q_continue": 0.2534785866737366,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
                 "segments_used": 2,
-                "q_halt": 0.9355589747428894,
-                "q_continue": 0.0644410252571106,
-                "source": "squad"
+                "q_halt": 0.7464869022369385,
+                "q_continue": 0.2535130977630615,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "2",
                 "segments_used": 2,
-                "q_halt": 0.9355629086494446,
-                "q_continue": 0.06443709135055542,
-                "source": "squad"
+                "q_halt": 0.7464867234230042,
+                "q_continue": 0.25351327657699585,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Raiders",
                 "segments_used": 2,
-                "q_halt": 0.9356040358543396,
-                "q_continue": 0.0643959641456604,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 2,
-                "q_halt": 0.9355196356773376,
-                "q_continue": 0.06448036432266235,
-                "source": "squad"
+                "q_halt": 0.7464873194694519,
+                "q_continue": 0.2535126805305481,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 2,
-        "loss": 2.8185171300668452,
+        "loss": 3.427317508248124,
         "model_metrics": {
-            "reasoning_gate_raw": 0.4269156754016876,
-            "reasoning_gate_effective": 0.402740478515625,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 2.0,
-            "avg_q_halt": 0.9674053728580475,
-            "avg_q_continue": 0.03259462714195251,
+            "avg_q_halt": 0.8779562844170464,
+            "avg_q_continue": 0.12204371558295356,
             "per_dataset": {
-                "squad": 2.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.7,
-            "hrm_f1": 0.7428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.7777777777777778,
+            "hrm_f1": 0.8253968253968255,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -157,8 +151,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 2,
-                "q_halt": 0.9681891798973083,
-                "q_continue": 0.03181082010269165,
+                "q_halt": 0.8634300231933594,
+                "q_continue": 0.13656997680664062,
                 "source": "squad"
             },
             {
@@ -167,8 +161,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Carolina Panthers",
                 "segments_used": 2,
-                "q_halt": 0.968189537525177,
-                "q_continue": 0.031810462474823,
+                "q_halt": 0.8634300231933594,
+                "q_continue": 0.13656997680664062,
                 "source": "squad"
             },
             {
@@ -177,105 +171,97 @@
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
                 "segments_used": 2,
-                "q_halt": 0.9669023752212524,
-                "q_continue": 0.03309762477874756,
+                "q_halt": 0.8634151220321655,
+                "q_continue": 0.13658487796783447,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "yes",
                 "segments_used": 2,
-                "q_halt": 0.966903030872345,
-                "q_continue": 0.03309696912765503,
-                "source": "squad"
+                "q_halt": 0.9064580798149109,
+                "q_continue": 0.09354192018508911,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
                 "segments_used": 2,
-                "q_halt": 0.9688970446586609,
-                "q_continue": 0.03110295534133911,
-                "source": "squad"
+                "q_halt": 0.9064581990242004,
+                "q_continue": 0.09354180097579956,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "\"Animorphs\"\"",
                 "segments_used": 2,
-                "q_halt": 0.9673248529434204,
-                "q_continue": 0.03267514705657959,
-                "source": "squad"
+                "q_halt": 0.9064580798149109,
+                "q_continue": 0.09354192018508911,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
                 "segments_used": 2,
-                "q_halt": 0.9669026136398315,
-                "q_continue": 0.03309738636016846,
-                "source": "squad"
+                "q_halt": 0.8639985918998718,
+                "q_continue": 0.13600140810012817,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "2",
                 "segments_used": 2,
-                "q_halt": 0.9669026732444763,
-                "q_continue": 0.03309732675552368,
-                "source": "squad"
+                "q_halt": 0.8639991283416748,
+                "q_continue": 0.1360008716583252,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Raiders",
                 "segments_used": 2,
-                "q_halt": 0.9673248529434204,
-                "q_continue": 0.03267514705657959,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 2,
-                "q_halt": 0.9665175676345825,
-                "q_continue": 0.03348243236541748,
-                "source": "squad"
+                "q_halt": 0.8639593124389648,
+                "q_continue": 0.13604068756103516,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 3,
-        "loss": 2.554108193052857,
+        "loss": 2.6605444089181898,
         "model_metrics": {
-            "reasoning_gate_raw": 0.4191456437110901,
-            "reasoning_gate_effective": 0.3962104320526123,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
             "avg_segments_used": 2.0,
-            "avg_q_halt": 0.9806054472923279,
-            "avg_q_continue": 0.019394552707672118,
+            "avg_q_halt": 0.8472145199775696,
+            "avg_q_continue": 0.15278548002243042,
             "per_dataset": {
-                "squad": 2.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.4444444444444444,
+            "hrm_f1": 0.5185185185185185,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -284,8 +270,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 2,
-                "q_halt": 0.9810053110122681,
-                "q_continue": 0.018994688987731934,
+                "q_halt": 0.8242581486701965,
+                "q_continue": 0.17574185132980347,
                 "source": "squad"
             },
             {
@@ -294,8 +280,8 @@
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
                 "segments_used": 2,
-                "q_halt": 0.9810055494308472,
-                "q_continue": 0.018994450569152832,
+                "q_halt": 0.8242581486701965,
+                "q_continue": 0.17574185132980347,
                 "source": "squad"
             },
             {
@@ -304,105 +290,97 @@
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
                 "segments_used": 2,
-                "q_halt": 0.9803609848022461,
-                "q_continue": 0.019639015197753906,
+                "q_halt": 0.8242536783218384,
+                "q_continue": 0.17574632167816162,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
                 "segments_used": 2,
-                "q_halt": 0.9803611040115356,
-                "q_continue": 0.019638895988464355,
-                "source": "squad"
+                "q_halt": 0.8928865790367126,
+                "q_continue": 0.10711342096328735,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
                 "segments_used": 2,
-                "q_halt": 0.981240451335907,
-                "q_continue": 0.018759548664093018,
-                "source": "squad"
+                "q_halt": 0.8928863406181335,
+                "q_continue": 0.10711365938186646,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The \"Animorphs\" series",
                 "segments_used": 2,
-                "q_halt": 0.9806000590324402,
-                "q_continue": 0.019399940967559814,
-                "source": "squad"
+                "q_halt": 0.892886221408844,
+                "q_continue": 0.107113778591156,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
                 "segments_used": 2,
-                "q_halt": 0.9803612232208252,
-                "q_continue": 0.019638776779174805,
-                "source": "squad"
+                "q_halt": 0.8245050311088562,
+                "q_continue": 0.1754949688911438,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "2",
                 "segments_used": 2,
-                "q_halt": 0.9803613424301147,
-                "q_continue": 0.019638657569885254,
-                "source": "squad"
+                "q_halt": 0.8245051503181458,
+                "q_continue": 0.17549484968185425,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Raiders",
                 "segments_used": 2,
-                "q_halt": 0.9806000590324402,
-                "q_continue": 0.019399940967559814,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 2,
-                "q_halt": 0.9801583886146545,
-                "q_continue": 0.01984161138534546,
-                "source": "squad"
+                "q_halt": 0.8244913816452026,
+                "q_continue": 0.17550861835479736,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 4,
-        "loss": 2.3248972815237066,
+        "loss": 2.3664952548327984,
         "model_metrics": {
-            "reasoning_gate_raw": 0.4138391315937042,
-            "reasoning_gate_effective": 0.3917275667190552,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9934339404106141,
-            "avg_q_continue": 0.006566059589385986,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8573817080921597,
+            "avg_q_continue": 0.1426182919078403,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.9,
-            "hrm_f1": 0.9,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.3333333333333333,
+            "hrm_f1": 0.380952380952381,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -410,126 +388,118 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9937458038330078,
-                "q_continue": 0.0062541961669921875,
+                "segments_used": 2,
+                "q_halt": 0.8372582793235779,
+                "q_continue": 0.16274172067642212,
                 "source": "squad"
             },
             {
                 "question": "Which NFL team represented the NFC at Super Bowl 50?",
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
-                "hrm": "Carolina Panthers",
-                "segments_used": 1,
-                "q_halt": 0.9937458038330078,
-                "q_continue": 0.0062541961669921875,
+                "hrm": "Denver Broncos",
+                "segments_used": 2,
+                "q_halt": 0.8372582793235779,
+                "q_continue": 0.16274172067642212,
                 "source": "squad"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9932346940040588,
-                "q_continue": 0.006765305995941162,
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "segments_used": 2,
+                "q_halt": 0.8372539281845093,
+                "q_continue": 0.16274607181549072,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9932348132133484,
-                "q_continue": 0.006765186786651611,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8974580764770508,
+                "q_continue": 0.10254192352294922,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9939437508583069,
-                "q_continue": 0.006056249141693115,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.8974578976631165,
+                "q_continue": 0.10254210233688354,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9934425354003906,
-                "q_continue": 0.006557464599609375,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Alien Chronicles",
+                "segments_used": 2,
+                "q_halt": 0.8974577784538269,
+                "q_continue": 0.1025422215461731,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9932348132133484,
-                "q_continue": 0.006765186786651611,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.8374365568161011,
+                "q_continue": 0.16256344318389893,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9932348132133484,
-                "q_continue": 0.006765186786651611,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "2",
+                "segments_used": 2,
+                "q_halt": 0.8374367356300354,
+                "q_continue": 0.1625632643699646,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9934425354003906,
-                "q_continue": 0.006557464599609375,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9930798411369324,
-                "q_continue": 0.006920158863067627,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Texans",
+                "segments_used": 2,
+                "q_halt": 0.8374178409576416,
+                "q_continue": 0.1625821590423584,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 5,
-        "loss": 2.183017805568191,
+        "loss": 2.2174676345355473,
         "model_metrics": {
-            "reasoning_gate_raw": 0.40759706497192383,
-            "reasoning_gate_effective": 0.3864304721355438,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9992886483669281,
-            "avg_q_continue": 0.0007113516330718994,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8668236003981696,
+            "avg_q_continue": 0.13317639960183036,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.2222222222222222,
+            "hrm_f1": 0.2222222222222222,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -537,9 +507,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9993083477020264,
-                "q_continue": 0.0006916522979736328,
+                "segments_used": 2,
+                "q_halt": 0.8507969975471497,
+                "q_continue": 0.14920300245285034,
                 "source": "squad"
             },
             {
@@ -547,9 +517,9 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9993083477020264,
-                "q_continue": 0.0006916522979736328,
+                "segments_used": 2,
+                "q_halt": 0.8507968783378601,
+                "q_continue": 0.1492031216621399,
                 "source": "squad"
             },
             {
@@ -557,106 +527,98 @@
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.999276340007782,
-                "q_continue": 0.0007236599922180176,
+                "segments_used": 2,
+                "q_halt": 0.850791871547699,
+                "q_continue": 0.14920812845230103,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.999276340007782,
-                "q_continue": 0.0007236599922180176,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8987478017807007,
+                "q_continue": 0.10125219821929932,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9993191957473755,
-                "q_continue": 0.0006808042526245117,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.8987476825714111,
+                "q_continue": 0.10125231742858887,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999290943145752,
-                "q_continue": 0.0007090568542480469,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Alien Chronicles",
+                "segments_used": 2,
+                "q_halt": 0.8987475633621216,
+                "q_continue": 0.10125243663787842,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.999276340007782,
-                "q_continue": 0.0007236599922180176,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.8509324789047241,
+                "q_continue": 0.14906752109527588,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.999276340007782,
-                "q_continue": 0.0007236599922180176,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "3",
+                "segments_used": 2,
+                "q_halt": 0.8509326577186584,
+                "q_continue": 0.14906734228134155,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999290943145752,
-                "q_continue": 0.0007090568542480469,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.999263346195221,
-                "q_continue": 0.0007366538047790527,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Houston Texans",
+                "segments_used": 2,
+                "q_halt": 0.8509184718132019,
+                "q_continue": 0.1490815281867981,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 6,
-        "loss": 2.083395125515171,
+        "loss": 2.118655041336759,
         "model_metrics": {
-            "reasoning_gate_raw": 0.4002220332622528,
-            "reasoning_gate_effective": 0.38013890385627747,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.999654495716095,
-            "avg_q_continue": 0.0003455042839050293,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8497874074512057,
+            "avg_q_continue": 0.1502125925487942,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.4444444444444444,
+            "hrm_f1": 0.4444444444444444,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -664,9 +626,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9996805191040039,
-                "q_continue": 0.00031948089599609375,
+                "segments_used": 2,
+                "q_halt": 0.8262573480606079,
+                "q_continue": 0.1737426519393921,
                 "source": "squad"
             },
             {
@@ -674,116 +636,108 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9996805191040039,
-                "q_continue": 0.00031948089599609375,
+                "segments_used": 2,
+                "q_halt": 0.8262572288513184,
+                "q_continue": 0.17374277114868164,
                 "source": "squad"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 1,
-                "q_halt": 0.9996392726898193,
-                "q_continue": 0.00036072731018066406,
+                "hrm": "Levi's Stadium",
+                "segments_used": 2,
+                "q_halt": 0.8262531757354736,
+                "q_continue": 0.17374682426452637,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9996392726898193,
-                "q_continue": 0.00036072731018066406,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8964136242866516,
+                "q_continue": 0.10358637571334839,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9996978044509888,
-                "q_continue": 0.00030219554901123047,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.8964136242866516,
+                "q_continue": 0.10358637571334839,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9996557235717773,
-                "q_continue": 0.00034427642822265625,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "\"Animorphs\"",
+                "segments_used": 2,
+                "q_halt": 0.8964136242866516,
+                "q_continue": 0.10358637571334839,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9996392726898193,
-                "q_continue": 0.00036072731018066406,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.8267099857330322,
+                "q_continue": 0.17329001426696777,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9996392726898193,
-                "q_continue": 0.00036072731018066406,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "2",
+                "segments_used": 2,
+                "q_halt": 0.8267102241516113,
+                "q_continue": 0.17328977584838867,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9996557235717773,
-                "q_continue": 0.00034427642822265625,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9996175765991211,
-                "q_continue": 0.00038242340087890625,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Houston Texans",
+                "segments_used": 2,
+                "q_halt": 0.8266578316688538,
+                "q_continue": 0.17334216833114624,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 7,
-        "loss": 2.0080874761792895,
+        "loss": 2.0367067906139757,
         "model_metrics": {
-            "reasoning_gate_raw": 0.39025723934173584,
-            "reasoning_gate_effective": 0.37158194184303284,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9997694373130799,
-            "avg_q_continue": 0.000230562686920166,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8626922633912828,
+            "avg_q_continue": 0.13730773660871717,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.2222222222222222,
+            "hrm_f1": 0.2222222222222222,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -791,9 +745,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9997978806495667,
-                "q_continue": 0.0002021193504333496,
+                "segments_used": 2,
+                "q_halt": 0.8455566763877869,
+                "q_continue": 0.15444332361221313,
                 "source": "squad"
             },
             {
@@ -801,9 +755,9 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9997978806495667,
-                "q_continue": 0.0002021193504333496,
+                "segments_used": 2,
+                "q_halt": 0.8455566763877869,
+                "q_continue": 0.15444332361221313,
                 "source": "squad"
             },
             {
@@ -811,106 +765,98 @@
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.999751627445221,
-                "q_continue": 0.00024837255477905273,
+                "segments_used": 2,
+                "q_halt": 0.8455548286437988,
+                "q_continue": 0.15444517135620117,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.999751627445221,
-                "q_continue": 0.00024837255477905273,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8967320322990417,
+                "q_continue": 0.10326796770095825,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.999806821346283,
-                "q_continue": 0.00019317865371704102,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.8967320322990417,
+                "q_continue": 0.10326796770095825,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999771773815155,
-                "q_continue": 0.0002282261848449707,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Alien Chronicles",
+                "segments_used": 2,
+                "q_halt": 0.8967320322990417,
+                "q_continue": 0.10326796770095825,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9997517466545105,
-                "q_continue": 0.00024825334548950195,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.8457954525947571,
+                "q_continue": 0.15420454740524292,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.999751627445221,
-                "q_continue": 0.00024837255477905273,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "3",
+                "segments_used": 2,
+                "q_halt": 0.8457956314086914,
+                "q_continue": 0.1542043685913086,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999771773815155,
-                "q_continue": 0.0002282261848449707,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9997416138648987,
-                "q_continue": 0.00025838613510131836,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Houston Texans",
+                "segments_used": 2,
+                "q_halt": 0.8457750082015991,
+                "q_continue": 0.15422499179840088,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 8,
-        "loss": 1.9452451157417379,
+        "loss": 1.9694500161386501,
         "model_metrics": {
-            "reasoning_gate_raw": 0.37792837619781494,
-            "reasoning_gate_effective": 0.3609069883823395,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999134182929993,
-            "avg_q_continue": 8.658170700073242e-05,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8353180885314941,
+            "avg_q_continue": 0.16468191146850586,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.4444444444444444,
+            "hrm_f1": 0.48148148148148145,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -918,9 +864,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999186992645264,
-                "q_continue": 8.130073547363281e-05,
+                "segments_used": 2,
+                "q_halt": 0.808111846446991,
+                "q_continue": 0.19188815355300903,
                 "source": "squad"
             },
             {
@@ -928,9 +874,9 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999186992645264,
-                "q_continue": 8.130073547363281e-05,
+                "segments_used": 2,
+                "q_halt": 0.808111846446991,
+                "q_continue": 0.19188815355300903,
                 "source": "squad"
             },
             {
@@ -938,106 +884,98 @@
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999105930328369,
-                "q_continue": 8.940696716308594e-05,
+                "segments_used": 2,
+                "q_halt": 0.8081114888191223,
+                "q_continue": 0.19188851118087769,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999105930328369,
-                "q_continue": 8.940696716308594e-05,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8897022008895874,
+                "q_continue": 0.1102977991104126,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.999920129776001,
-                "q_continue": 7.987022399902344e-05,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Secretary of State",
+                "segments_used": 2,
+                "q_halt": 0.8897022008895874,
+                "q_continue": 0.1102977991104126,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999144077301025,
-                "q_continue": 8.559226989746094e-05,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Awakening",
+                "segments_used": 2,
+                "q_halt": 0.8897022008895874,
+                "q_continue": 0.1102977991104126,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999105930328369,
-                "q_continue": 8.940696716308594e-05,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.8081414103507996,
+                "q_continue": 0.19185858964920044,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999105930328369,
-                "q_continue": 8.940696716308594e-05,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "2",
+                "segments_used": 2,
+                "q_halt": 0.8081414103507996,
+                "q_continue": 0.19185858964920044,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999144077301025,
-                "q_continue": 8.559226989746094e-05,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999054670333862,
-                "q_continue": 9.453296661376953e-05,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Raiders",
+                "segments_used": 2,
+                "q_halt": 0.8081381916999817,
+                "q_continue": 0.1918618083000183,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 9,
-        "loss": 1.8902135274049316,
+        "loss": 1.9183744861881362,
         "model_metrics": {
-            "reasoning_gate_raw": 0.3623635768890381,
-            "reasoning_gate_effective": 0.3472942113876343,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999552726745605,
-            "avg_q_continue": 4.4727325439453124e-05,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8234489361445109,
+            "avg_q_continue": 0.1765510638554891,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.3333333333333333,
+            "hrm_f1": 0.37037037037037035,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -1045,9 +983,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999538660049438,
-                "q_continue": 4.6133995056152344e-05,
+                "segments_used": 2,
+                "q_halt": 0.7949698567390442,
+                "q_continue": 0.2050301432609558,
                 "source": "squad"
             },
             {
@@ -1055,9 +993,9 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999538660049438,
-                "q_continue": 4.6133995056152344e-05,
+                "segments_used": 2,
+                "q_halt": 0.7949698567390442,
+                "q_continue": 0.2050301432609558,
                 "source": "squad"
             },
             {
@@ -1065,106 +1003,98 @@
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999561309814453,
-                "q_continue": 4.38690185546875e-05,
+                "segments_used": 2,
+                "q_halt": 0.7949694395065308,
+                "q_continue": 0.20503056049346924,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999561309814453,
-                "q_continue": 4.38690185546875e-05,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8803430199623108,
+                "q_continue": 0.11965698003768921,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999531507492065,
-                "q_continue": 4.684925079345703e-05,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Secretary of State",
+                "segments_used": 2,
+                "q_halt": 0.8803430199623108,
+                "q_continue": 0.11965698003768921,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999555349349976,
-                "q_continue": 4.4465065002441406e-05,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Awakening",
+                "segments_used": 2,
+                "q_halt": 0.8803430199623108,
+                "q_continue": 0.11965698003768921,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999561309814453,
-                "q_continue": 4.38690185546875e-05,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.7950348258018494,
+                "q_continue": 0.20496517419815063,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999561309814453,
-                "q_continue": 4.38690185546875e-05,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "3",
+                "segments_used": 2,
+                "q_halt": 0.7950348854064941,
+                "q_continue": 0.20496511459350586,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999555349349976,
-                "q_continue": 4.4465065002441406e-05,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999562501907349,
-                "q_continue": 4.374980926513672e-05,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Raiders",
+                "segments_used": 2,
+                "q_halt": 0.7950325012207031,
+                "q_continue": 0.20496749877929688,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 10,
-        "loss": 1.8504605677082087,
+        "loss": 1.8712359111446308,
         "model_metrics": {
-            "reasoning_gate_raw": 0.34872666001319885,
-            "reasoning_gate_effective": 0.3352457582950592,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999815344810485,
-            "avg_q_continue": 1.8465518951416016e-05,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.8058316773838468,
+            "avg_q_continue": 0.1941683226161533,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.2222222222222222,
+            "hrm_f1": 0.2222222222222222,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -1172,9 +1102,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999827146530151,
-                "q_continue": 1.728534698486328e-05,
+                "segments_used": 2,
+                "q_halt": 0.7727779150009155,
+                "q_continue": 0.22722208499908447,
                 "source": "squad"
             },
             {
@@ -1182,9 +1112,9 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999827146530151,
-                "q_continue": 1.728534698486328e-05,
+                "segments_used": 2,
+                "q_halt": 0.7727779150009155,
+                "q_continue": 0.22722208499908447,
                 "source": "squad"
             },
             {
@@ -1192,106 +1122,98 @@
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999814033508301,
-                "q_continue": 1.8596649169921875e-05,
+                "segments_used": 2,
+                "q_halt": 0.772777795791626,
+                "q_continue": 0.22722220420837402,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999814033508301,
-                "q_continue": 1.8596649169921875e-05,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.8719068765640259,
+                "q_continue": 0.12809312343597412,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999823570251465,
-                "q_continue": 1.7642974853515625e-05,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.8719068765640259,
+                "q_continue": 0.12809312343597412,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999982476234436,
-                "q_continue": 1.7523765563964844e-05,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Aliens",
+                "segments_used": 2,
+                "q_halt": 0.8719068765640259,
+                "q_continue": 0.12809312343597412,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999814033508301,
-                "q_continue": 1.8596649169921875e-05,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.7728107571601868,
+                "q_continue": 0.22718924283981323,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999814033508301,
-                "q_continue": 1.8596649169921875e-05,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "3",
+                "segments_used": 2,
+                "q_halt": 0.7728108167648315,
+                "q_continue": 0.22718918323516846,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999982476234436,
-                "q_continue": 1.7523765563964844e-05,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999769926071167,
-                "q_continue": 2.300739288330078e-05,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Houston Texans",
+                "segments_used": 2,
+                "q_halt": 0.7728092670440674,
+                "q_continue": 0.22719073295593262,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 11,
-        "loss": 1.8105478136778386,
+        "loss": 1.8297822756299587,
         "model_metrics": {
-            "reasoning_gate_raw": 0.3361707031726837,
-            "reasoning_gate_effective": 0.32405444979667664,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999908804893494,
-            "avg_q_continue": 9.119510650634766e-06,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.9154219561152988,
+            "avg_q_continue": 0.08457804388470119,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.4444444444444444,
+            "hrm_f1": 0.4920634920634921,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -1299,9 +1221,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999908208847046,
-                "q_continue": 9.179115295410156e-06,
+                "segments_used": 2,
+                "q_halt": 0.9158498644828796,
+                "q_continue": 0.08415013551712036,
                 "source": "squad"
             },
             {
@@ -1309,116 +1231,108 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999908208847046,
-                "q_continue": 9.179115295410156e-06,
+                "segments_used": 2,
+                "q_halt": 0.9158498644828796,
+                "q_continue": 0.08415013551712036,
                 "source": "squad"
             },
             {
                 "question": "Where did Super Bowl 50 take place?",
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
+                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
+                "segments_used": 2,
+                "q_halt": 0.9158504605293274,
+                "q_continue": 0.08414953947067261,
                 "source": "squad"
             },
             {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "yes",
+                "segments_used": 2,
+                "q_halt": 0.9145745038986206,
+                "q_continue": 0.0854254961013794,
+                "source": "hotpotqa"
             },
             {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.999990701675415,
-                "q_continue": 9.298324584960938e-06,
-                "source": "squad"
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.914574384689331,
+                "q_continue": 0.08542561531066895,
+                "source": "hotpotqa"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999908208847046,
-                "q_continue": 9.179115295410156e-06,
-                "source": "squad"
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Fantastic The",
+                "segments_used": 2,
+                "q_halt": 0.914574384689331,
+                "q_continue": 0.08542561531066895,
+                "source": "hotpotqa"
             },
             {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.9158411622047424,
+                "q_continue": 0.08415883779525757,
+                "source": "drop"
             },
             {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "3",
+                "segments_used": 2,
+                "q_halt": 0.915841281414032,
+                "q_continue": 0.08415871858596802,
+                "source": "drop"
             },
             {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999908208847046,
-                "q_continue": 9.179115295410156e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999910593032837,
-                "q_continue": 8.940696716308594e-06,
-                "source": "squad"
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Raiders",
+                "segments_used": 2,
+                "q_halt": 0.9158416986465454,
+                "q_continue": 0.08415830135345459,
+                "source": "drop"
             }
         ]
     },
     {
         "epoch": 12,
-        "loss": 1.7774956321665474,
+        "loss": 1.7915877974363787,
         "model_metrics": {
-            "reasoning_gate_raw": 0.32143864035606384,
-            "reasoning_gate_effective": 0.31080713868141174,
+            "reasoning_gate_raw": 0.5,
+            "reasoning_gate_effective": 0.46211719512939453,
             "total_params_M": 286.519298,
             "t5_params_M": 247.577856,
             "hrm_params_M": 38.941442
         },
         "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.999994158744812,
-            "avg_q_continue": 5.841255187988281e-06,
+            "avg_segments_used": 2.0,
+            "avg_q_halt": 0.5623361666997274,
+            "avg_q_continue": 0.43766383330027264,
             "per_dataset": {
-                "squad": 1.0
+                "squad": 2.0,
+                "hotpotqa": 2.0,
+                "drop": 2.0
             }
         },
         "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
+            "hrm_exact_match": 0.2222222222222222,
+            "hrm_f1": 0.2222222222222222,
+            "baseline_exact_match": 0.6666666666666666,
+            "baseline_f1": 0.6666666666666666
         },
         "validation_samples": [
             {
@@ -1426,9 +1340,9 @@
                 "target": "Denver Broncos",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
+                "segments_used": 2,
+                "q_halt": 0.5363924503326416,
+                "q_continue": 0.4636075496673584,
                 "source": "squad"
             },
             {
@@ -1436,9 +1350,9 @@
                 "target": "Carolina Panthers",
                 "baseline": "Denver Broncos",
                 "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
+                "segments_used": 2,
+                "q_halt": 0.5363924503326416,
+                "q_continue": 0.4636075496673584,
                 "source": "squad"
             },
             {
@@ -1446,1096 +1360,70 @@
                 "target": "Santa Clara, California",
                 "baseline": "Levi's Stadium",
                 "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.999994158744812,
-                "q_continue": 5.841255187988281e-06,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 13,
-        "loss": 1.7479064908108985,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.31162241101264954,
-            "reasoning_gate_effective": 0.3019123077392578,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999909400939941,
-            "avg_q_continue": 9.059906005859375e-06,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999909400939941,
-                "q_continue": 9.059906005859375e-06,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 14,
-        "loss": 1.7204434435759017,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.3020036220550537,
-            "reasoning_gate_effective": 0.293145090341568,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999963045120239,
-            "avg_q_continue": 3.6954879760742188e-06,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.6,
-            "hrm_f1": 0.7,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999963045120239,
-                "q_continue": 3.6954879760742188e-06,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 15,
-        "loss": 1.6960632490959249,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.29401326179504395,
-            "reasoning_gate_effective": 0.28582438826560974,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999934434890747,
-            "avg_q_continue": 6.556510925292969e-06,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.6,
-            "hrm_f1": 0.7428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999934434890747,
-                "q_continue": 6.556510925292969e-06,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 16,
-        "loss": 1.674923041227784,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.2850542962551117,
-            "reasoning_gate_effective": 0.2775764465332031,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999997615814209,
-            "avg_q_continue": 2.384185791015625e-07,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 17,
-        "loss": 1.6524995095185888,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.2807694375514984,
-            "reasoning_gate_effective": 0.2736170291900635,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999997615814209,
-            "avg_q_continue": 2.384185791015625e-07,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999997615814209,
-                "q_continue": 2.384185791015625e-07,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 18,
-        "loss": 1.6362792784725424,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.27398446202278137,
-            "reasoning_gate_effective": 0.2673284709453583,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999998807907104,
-            "avg_q_continue": 1.1920928955078125e-07,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 19,
-        "loss": 1.6166171744179878,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.2662631571292877,
-            "reasoning_gate_effective": 0.26014426350593567,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999998807907104,
-            "avg_q_continue": 1.1920928955078125e-07,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.8,
-            "hrm_f1": 0.8,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "golden anniversary",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            }
-        ]
-    },
-    {
-        "epoch": 20,
-        "loss": 1.6018419757580706,
-        "model_metrics": {
-            "reasoning_gate_raw": 0.26163795590400696,
-            "reasoning_gate_effective": 0.2558269202709198,
-            "total_params_M": 286.519298,
-            "t5_params_M": 247.577856,
-            "hrm_params_M": 38.941442
-        },
-        "hrm_metrics": {
-            "avg_segments_used": 1.0,
-            "avg_q_halt": 0.9999998807907104,
-            "avg_q_continue": 1.1920928955078125e-07,
-            "per_dataset": {
-                "squad": 1.0
-            }
-        },
-        "accuracy": {
-            "hrm_exact_match": 0.6,
-            "hrm_f1": 0.6428571428571429,
-            "baseline_exact_match": 0.6,
-            "baseline_f1": 0.6
-        },
-        "validation_samples": [
-            {
-                "question": "Which NFL team represented the AFC at Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team represented the NFC at Super Bowl 50?",
-                "target": "Carolina Panthers",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Where did Super Bowl 50 take place?",
-                "target": "Santa Clara, California",
-                "baseline": "Levi's Stadium",
-                "hrm": "Levi's Stadium in the San Francisco Bay Area at Santa Clara, California",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "Which NFL team won Super Bowl 50?",
-                "target": "Denver Broncos",
-                "baseline": "Denver Broncos",
-                "hrm": "Denver Broncos",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
-                "target": "gold",
-                "baseline": "gold",
-                "hrm": "gold",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold-themed",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What day was the game played on?",
-                "target": "February 7, 2016",
-                "baseline": "February 7, 2016",
-                "hrm": "February 7, 2016",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What is the AFC short for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What was the theme of Super Bowl 50?",
-                "target": "\"golden anniversary\"",
-                "baseline": "gold",
-                "hrm": "gold-themed",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
-            },
-            {
-                "question": "What does AFC stand for?",
-                "target": "American Football Conference",
-                "baseline": "American Football Conference",
-                "hrm": "American Football Conference",
-                "segments_used": 1,
-                "q_halt": 0.9999998807907104,
-                "q_continue": 1.1920928955078125e-07,
-                "source": "squad"
+                "segments_used": 2,
+                "q_halt": 0.536389946937561,
+                "q_continue": 0.46361005306243896,
+                "source": "squad"
+            },
+            {
+                "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+                "target": "yes",
+                "baseline": "yes",
+                "hrm": "no",
+                "segments_used": 2,
+                "q_halt": 0.6142154335975647,
+                "q_continue": 0.3857845664024353,
+                "source": "hotpotqa"
+            },
+            {
+                "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+                "target": "Chief of Protocol",
+                "baseline": "Lord High Treasurer",
+                "hrm": "Lord High Treasurer",
+                "segments_used": 2,
+                "q_halt": 0.6142151951789856,
+                "q_continue": 0.3857848048210144,
+                "source": "hotpotqa"
+            },
+            {
+                "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+                "target": "Animorphs",
+                "baseline": "Animorphs",
+                "hrm": "The Awakening",
+                "segments_used": 2,
+                "q_halt": 0.6142157912254333,
+                "q_continue": 0.38578420877456665,
+                "source": "hotpotqa"
+            },
+            {
+                "question": "Who scored the first touchdown of the game?",
+                "target": "Chaz Schilens",
+                "baseline": "Chaz Schilens",
+                "hrm": "Chaz Schilens",
+                "segments_used": 2,
+                "q_halt": 0.5364015102386475,
+                "q_continue": 0.46359848976135254,
+                "source": "drop"
+            },
+            {
+                "question": "How many field goals did Kris Brown kick?",
+                "target": "2",
+                "baseline": "2",
+                "hrm": "3",
+                "segments_used": 2,
+                "q_halt": 0.5364016890525818,
+                "q_continue": 0.4635983109474182,
+                "source": "drop"
+            },
+            {
+                "question": "Which team won the game?",
+                "target": "Raiders",
+                "baseline": "Raiders",
+                "hrm": "Texans",
+                "segments_used": 2,
+                "q_halt": 0.5364010334014893,
+                "q_continue": 0.46359896659851074,
+                "source": "drop"
             }
         ]
     }
