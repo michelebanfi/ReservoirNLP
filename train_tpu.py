@@ -220,4 +220,6 @@ def _mp_fn(rank, flags):
 
 if __name__ == '__main__':
     # Configures execution of _mp_fn on all available TPU cores
-    xmp.spawn(_mp_fn, args=({},), nprocs=8, start_method='fork')
+    # nprocs=None allows PJRT to automatically detect and spawn the correct number of processes
+    # (e.g., 4 processes for v3-8 where each process manages 2 cores, or other configs for v5)
+    xmp.spawn(_mp_fn, args=({},), nprocs=None, start_method='fork')
