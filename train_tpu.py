@@ -230,4 +230,4 @@ def _mp_fn(rank, flags):
 if __name__ == '__main__':
     # Configures execution of _mp_fn.
     # nprocs=8 utilizes all 8 cores of the Kaggle TPU v5e-8 slice.
-    xmp.spawn(_mp_fn, args=({},), nprocs=8, start_method='fork')
+    xmp.spawn(_mp_fn, args=({},), nprocs=1, start_method='fork')
