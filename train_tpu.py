@@ -1,7 +1,11 @@
-
 import os
 import time
 import torch
+
+# Kaggle TPU v5e-8 Configuration
+os.environ["PJRT_DEVICE"] = "TPU"
+os.environ["TPU_NUM_DEVICES"] = "8"
+os.environ["XLA_USE_BF16"] = "1" # Optimize for performance
 import torch.nn as nn
 import torch.multiprocessing as mp
 import torch_xla.core.xla_model as xm
@@ -229,5 +233,5 @@ def _mp_fn(rank, flags):
 
 if __name__ == '__main__':
     # Configures execution of _mp_fn.
-    # nprocs=8 utilizes all 8 cores of the Kaggle TPU v5e-8 slice.
-    xmp.spawn(_mp_fn, args=({},), nprocs=None, start_method='fork')
+    # nprocs=8 is REQUIRED for Kaggle TPU v5e-8 to spawn 8 workers (one per chip).
+    xmp.spawn(_mp_fn, args=({},), nprocs=8, start_method='fork')
