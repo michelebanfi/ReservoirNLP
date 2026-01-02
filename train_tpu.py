@@ -231,4 +231,4 @@ if __name__ == '__main__':
     # Configures execution of _mp_fn.
     # nprocs=4 matches the "Expected 4 worker addresses" error, indicating this runtime
     # expects 4 processes (likely one per chip, managing 2 cores each in PJRT).
-    xmp.spawn(_mp_fn, args=({},), nprocs=4, start_method='fork')
+    xmp.spawn(_mp_fn, args=({},), nprocs=1, start_method='fork')
