@@ -37,9 +37,11 @@ def _mp_fn(rank, flags):
     # 2. Config Override for TPU
     class TPUConfig(Config):
         DEVICE = device
-        # Ensure batch size is per-core (e.g. 16 per core * 8 cores = 128 global batch size)
-        # Adjust if needed. standard batch size 16 per core is usually fine for TPU.
-        # Ensure we use a compatible scheduler/optimizer setup if needed.
+        # Ensure batch size is per-core
+        # Batch size 16 requires ~26GB, but TPU v2/v3 core has 16GB.
+        # Reducing to 4 to fit comfortably in HBM.
+        BATCH_SIZE = 4
+        # Note: Global batch size = 4 * 8 (cores) = 32
     
     cfg = TPUConfig()
     
@@ -102,6 +104,7 @@ def _mp_fn(rank, flags):
     
     # 6. Training Loop
     xm.master_print("Starting TPU Training Loop...")
+    xm.master_print("NOTE: The first step will take a few minutes to compile the XLA graph (JIT). Subsequent steps will be fast.")
     
     model.train()
     # Initial freeze (curriculum)
@@ -225,7 +228,7 @@ def _mp_fn(rank, flags):
                 print("Model saved.")
 
 if __name__ == '__main__':
-    # Configures execution of _mp_fn. 
-    # nprocs=1 is recommended for Colab PJRT runtime to avoid "Expected 4 worker addresses" errors.
-    # We will log available devices inside the function to verify visibility.
-    xmp.spawn(_mp_fn, args=({},), nprocs=1, start_method='fork')
+    # Configures execution of _mp_fn.
+    # nprocs=4 matches the "Expected 4 worker addresses" error, indicating this runtime
+    # expects 4 processes (likely one per chip, managing 2 cores each in PJRT).
+    xmp.spawn(_mp_fn, args=({},), nprocs=4, start_method='fork')
