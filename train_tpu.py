@@ -28,6 +28,11 @@ def _mp_fn(rank, flags):
     device = xm.xla_device()
     xm.master_print(f"Process {rank} utilizing device {device}")
     
+    # Debug: Check total available devices
+    devices = xm.get_xla_supported_devices()
+    xm.master_print(f"Total XLA Devices Detected: {len(devices)}")
+    xm.master_print(f"Devices: {devices}")
+    
     # 2. Config Override for TPU
     class TPUConfig(Config):
         DEVICE = device
@@ -219,7 +224,7 @@ def _mp_fn(rank, flags):
                 print("Model saved.")
 
 if __name__ == '__main__':
-    # Configures execution of _mp_fn on all available TPU cores
-    # nprocs=None allows PJRT to automatically detect and spawn the correct number of processes
-    # (e.g., 4 processes for v3-8 where each process manages 2 cores, or other configs for v5)
-    xmp.spawn(_mp_fn, args=({},), nprocs=None, start_method='fork')
+    # Configures execution of _mp_fn. 
+    # nprocs=1 is recommended for Colab PJRT runtime to avoid "Expected 4 worker addresses" errors.
+    # We will log available devices inside the function to verify visibility.
+    xmp.spawn(_mp_fn, args=({},), nprocs=1, start_method='fork')
