@@ -4,6 +4,39 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2026-01-03: ACT Overcorrection Fix - Adaptive Ponder Cost
+
+**Status**: Implemented
+
+### Problem
+After the 2026-01-01 fixes, training showed ACT overcorrected in the opposite direction:
+- q_halt saturated to 1.0 by epoch 2
+- Model halted after exactly 1 segment (was stuck at 2 before)
+- ponder cost (τ=0.1) dominated as LM loss decreased from 3.6→1.5
+- Best accuracy was epoch 1 (50% EM at 2 segments), degraded with 1 segment
+
+### Root Cause
+As training progressed, LM loss dropped from ~3.6 to ~1.5, but ACT loss remained constant relative to ponder cost. This caused ACT to represent an increasing fraction of total loss (5% → 13%), pushing the model to minimize computation over accuracy.
+
+### Changes
+
+1. **Reduced Ponder Cost** (`config.py`):
+   - `ACT_PONDER_COST_TAU`: 0.1 → 0.01 (10x reduction)
+
+2. **Adaptive Scaling** (`config.py`, `train.py`):
+   - Added `ACT_ADAPTIVE_SCALING = True`
+   - Added `INITIAL_LM_LOSS = 3.5` 
+   - ACT loss now scales by `(current_lm_loss / initial_lm_loss)`
+   - At epoch 1: `act_loss = 0.01 * ponder * 1.0`
+   - At epoch 20: `act_loss = 0.01 * ponder * 0.43` (auto-reduced)
+
+### Expected Behavior
+- ACT signal remains proportional to LM loss throughout training
+- Model should use 2-4 segments instead of collapsing to 1
+- Q-halt should vary based on question difficulty, not saturate to 1.0
+
+---
+
 ## [IMPLEMENTED] 2026-01-01: Critical Fixes - Gradient Flow & ACT Mechanism
 
 **Status**: Implemented

@@ -382,7 +382,15 @@ def train_step(model, batch, optimizer, config, epoch):
     # ρ = N + R where N = number of steps, R = remainder (1 - cumulative)
     # This encourages the model to halt quickly
     ponder_cost = steps_taken.mean() + (1.0 - cumulative_halt).mean()
-    act_loss = tau * ponder_cost
+    
+    # Adaptive scaling: keep ponder cost proportional to LM loss
+    # As LM loss drops, reduce ponder cost to prevent it from dominating
+    if getattr(config, 'ACT_ADAPTIVE_SCALING', False):
+        initial_lm = getattr(config, 'INITIAL_LM_LOSS', 3.5)
+        scale_factor = final_lm_loss.detach() / initial_lm  # detach to not affect LM gradients
+        act_loss = tau * ponder_cost * scale_factor
+    else:
+        act_loss = tau * ponder_cost
     
     # ============== Total Loss ==============
     total_loss = final_lm_loss + act_loss

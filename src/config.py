@@ -17,7 +17,9 @@ class Config:
     # Deep Supervision & ACT (Graves 2016)
     MAX_SEGMENTS = 4       # M_max (reduced for memory)
     ACT_EPSILON = 0.01     # Halt when cumulative prob within epsilon of 1
-    ACT_PONDER_COST_TAU = 0.1    # Ponder cost regularizer weight (100x stronger for learning)
+    ACT_PONDER_COST_TAU = 0.01   # Ponder cost weight (reduced 10x to prevent early halting)
+    ACT_ADAPTIVE_SCALING = True  # Scale ponder cost relative to initial LM loss
+    INITIAL_LM_LOSS = 3.5        # Approximate initial LM loss for adaptive scaling
     Q_HEAD_BIAS_INIT = -2.0      # Init Q-head bias: sigmoid(-2)≈0.12 = encourage continuing
     NUM_VAL_SAMPLES = 50   # Number of validation samples for stable metrics
     
