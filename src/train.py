@@ -1,6 +1,13 @@
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
+
+# Workaround for NVML driver issues with newer SDPA backends
+# Forces use of math-based attention which is more compatible
+if torch.cuda.is_available():
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
+    torch.backends.cuda.enable_math_sdp(True)
 import torch.nn as nn
 import torch.nn.functional as F
 import os
