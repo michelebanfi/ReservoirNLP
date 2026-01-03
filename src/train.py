@@ -1,5 +1,7 @@
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# Disable NVML-based CUDA checks (workaround for outdated driver issues)
+os.environ["PYTORCH_NVML_BASED_CUDA_CHECK"] = "0"
 import torch
 
 # Workaround for NVML driver issues with newer SDPA backends

@@ -15,7 +15,7 @@ class Config:
     FORCE_HRM = True  # If True, disable gate/skip connection (100% HRM, no bypass)
     
     # Deep Supervision & ACT (Graves 2016)
-    MAX_SEGMENTS = 8       # M_max
+    MAX_SEGMENTS = 4       # M_max (reduced for memory)
     ACT_EPSILON = 0.01     # Halt when cumulative prob within epsilon of 1
     ACT_PONDER_COST_TAU = 0.1    # Ponder cost regularizer weight (100x stronger for learning)
     Q_HEAD_BIAS_INIT = -2.0      # Init Q-head bias: sigmoid(-2)≈0.12 = encourage continuing
@@ -23,7 +23,7 @@ class Config:
     
     # Training
     DROPOUT = 0.1
-    BATCH_SIZE = 16
+    BATCH_SIZE = 4         # Reduced for driver-constrained GPU memory
     LEARNING_RATE = 1e-4
     WEIGHT_DECAY = 0.01    # Adjusted standard value
     EPOCHS = 20
