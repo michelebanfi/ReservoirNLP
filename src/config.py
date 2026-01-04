@@ -21,6 +21,7 @@ class Config:
     ACT_ADAPTIVE_SCALING = True  # Scale ponder cost relative to initial LM loss
     INITIAL_LM_LOSS = 3.5        # Approximate initial LM loss for adaptive scaling
     Q_HEAD_BIAS_INIT = -2.0      # Init Q-head bias: sigmoid(-2)≈0.12 = encourage continuing
+    Q_HEAD_REWARD_WEIGHT = 0.1   # Weight for direct Q-head training loss
     NUM_VAL_SAMPLES = 50   # Number of validation samples for stable metrics
     
     # Training

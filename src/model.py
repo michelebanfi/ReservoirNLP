@@ -185,8 +185,9 @@ class HierarchicalReasoningCore(nn.Module):
         
         self.q_head = nn.Linear(dim, 1, bias=True)
         with torch.no_grad():
-            self.q_head.weight.zero_()
-            # Use config bias: sigmoid(-2)≈0.12 encourages continuing, learns to halt
+            # Non-zero init: allows q_halt to vary based on zH content
+            nn.init.normal_(self.q_head.weight, mean=0.0, std=0.02)
+            # Bias: sigmoid(-2)≈0.12 encourages continuing initially
             q_bias = getattr(config, 'Q_HEAD_BIAS_INIT', 0.0)
             self.q_head.bias.data = torch.tensor([q_bias])
         

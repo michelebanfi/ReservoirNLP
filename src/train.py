@@ -310,6 +310,7 @@ def train_step(model, batch, optimizer, config, epoch):
     halting_weights = []  # List of [B] tensors
     zH_states = []  # List of [B, L, D] tensors
     lm_losses = []  # LM loss at each step (for weighted combination)
+    p_halt_tensors = []  # Collect p_halt tensors for Q-head reward loss
     
     halting_probs_log = []  # For logging
     steps_taken = torch.zeros(B, device=device)  # Track steps per sample
@@ -330,6 +331,7 @@ def train_step(model, batch, optimizer, config, epoch):
         # Get halting probability [B, 1] -> [B]
         p_halt = model.hrm_core.get_q_values(zH).squeeze(-1)
         halting_probs_log.append(p_halt.mean().item())
+        p_halt_tensors.append(p_halt)
         
         # Compute remainder (how much probability budget left)
         remainder = 1.0 - cumulative_halt  # [B]
@@ -391,9 +393,28 @@ def train_step(model, batch, optimizer, config, epoch):
         act_loss = tau * ponder_cost * scale_factor
     else:
         act_loss = tau * ponder_cost
+    # ============== Q-Head Reward Loss (Direct Q-head Training) ==============
+    # Train Q-head to learn when more reasoning helps:
+    # If segment m improved loss over m-1, encourage continuing (low p_halt)
+    # If segment m didn't help, encourage halting (high p_halt)
+    q_reward_loss = torch.tensor(0.0, device=device)
+    q_reward_weight = getattr(config, 'Q_HEAD_REWARD_WEIGHT', 0.1)
+    
+    if len(lm_losses) > 1 and q_reward_weight > 0:
+        for m in range(1, len(lm_losses)):
+            # Positive improvement means segment helped
+            improvement = (lm_losses[m-1] - lm_losses[m]).detach()  # detach LM gradients
+            # target: 0 (continue) if improved, 1 (halt) if not
+            # Use sigmoid to convert improvement to 0-1 range
+            target_halt = torch.sigmoid(-improvement * 5.0)  # scale factor for sensitivity
+            # BCE loss: train p_halt toward target
+            q_reward_loss = q_reward_loss + F.binary_cross_entropy(
+                p_halt_tensors[m].mean(), target_halt, reduction='mean'
+            )
+        q_reward_loss = q_reward_loss / (len(lm_losses) - 1)  # normalize
     
     # ============== Total Loss ==============
-    total_loss = final_lm_loss + act_loss
+    total_loss = final_lm_loss + act_loss + q_reward_weight * q_reward_loss
     
     # Backward
     total_loss.backward()

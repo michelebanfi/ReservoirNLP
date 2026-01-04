@@ -4,6 +4,48 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2026-01-04: Q-Head Learning Fixes - Non-Zero Init & Reward Loss
+
+**Status**: Implemented
+
+### Problem
+After ACT overcorrection fix, training showed stable 2-segment usage but **zero per-dataset differentiation**:
+- std(q_halt) ≈ 0.000001 across all samples
+- Q-head weights remained zeros: `q_halt = sigmoid(0*zH + bias) = constant`
+- Squad, HotpotQA, and DROP all used exactly 2 segments
+
+### Root Cause
+1. Q-head weights initialized to zeros and never learned
+2. Ponder cost gradient too weak to update Q-head weights meaningfully
+
+### Changes
+
+1. **Non-Zero Q-head Initialization** (`model.py`):
+   ```python
+   nn.init.normal_(self.q_head.weight, mean=0.0, std=0.02)  # was: .zero_()
+   ```
+   Now q_halt varies based on zH content from the start.
+
+2. **Q-Head Reward Loss** (`train.py`):
+   - Compares LM loss between consecutive segments
+   - If segment improved loss → train toward continue (low p_halt)
+   - If segment didn't help → train toward halt (high p_halt)
+   - Weighted by `Q_HEAD_REWARD_WEIGHT = 0.1`
+
+3. **New Config Parameter** (`config.py`):
+   - `Q_HEAD_REWARD_WEIGHT = 0.1` controls reward loss strength
+
+### Expected Behavior
+- Q-head weights will be non-zero and adapt during training
+- q_halt will vary per sample based on question difficulty
+- Harder questions (HotpotQA, DROP) → lower q_halt → more segments
+- Easy questions (SQuAD) → higher q_halt → fewer segments
+
+### Future Consideration
+If results are still insufficient, consider removing `detach()` from HRM loop (Fix 3) for full gradient flow, at cost of higher memory usage.
+
+---
+
 ## [IMPLEMENTED] 2026-01-03: ACT Overcorrection Fix - Adaptive Ponder Cost
 
 **Status**: Implemented
