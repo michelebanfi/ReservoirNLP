@@ -316,14 +316,10 @@ def train_step(model, batch, optimizer, config, epoch):
     steps_taken = torch.zeros(B, device=device)  # Track steps per sample
     
     for m in range(M_max):
-        zH_in = zH.detach()
-        zL_in = zL.detach()
-        
-        # 1-step gradient approximation for memory
-        if m == 0:
-            current_memory = memory
-        else:
-            current_memory = memory.detach()
+        # Fix 3: Full gradient flow - no detach (increased memory usage)
+        zH_in = zH
+        zL_in = zL
+        current_memory = memory
         
         # Forward HRM segment
         zH, zL = model.hrm_core.forward_segment(zH_in, zL_in, current_memory, key_padding_mask=src_mask)
