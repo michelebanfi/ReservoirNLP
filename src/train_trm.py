@@ -272,9 +272,10 @@ def train_step(model, batch, optimizer, config, ema=None):
     input_ids = batch['input_ids'].to(device)
     labels = batch['labels'].to(device)
     
-    # Encode once
-    memory, src_mask = model.encode(input_ids)
-    B, L, D = memory.shape
+    # Get initial memory shape (needed for init_state)
+    with torch.no_grad():
+        memory_init, src_mask = model.encode(input_ids)
+        B, L, D = memory_init.shape
     
     # Initialize y, z
     y, z = model.trm_core.init_state(B, L, device)
@@ -285,6 +286,9 @@ def train_step(model, batch, optimizer, config, ema=None):
     
     # Deep Supervision Loop
     for step in range(config.N_SUPERVISION):
+        # Re-encode at each step to get fresh computation graph
+        # This is necessary when T5 is unfrozen, as backward() frees the graph
+        memory, src_mask = model.encode(input_ids)
         optimizer.zero_grad()
         
         # Deep recursion: updates (y, z) with T-1 no-grad + 1 with-grad

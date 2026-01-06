@@ -404,5 +404,411 @@
         "source": "drop"
       }
     ]
+  },
+  {
+    "epoch": 2,
+    "lm_loss": 3.3768217379688084,
+    "act_loss": 0.5847488929445084,
+    "avg_supervision_steps": 15.152,
+    "trm_metrics": {
+      "avg_supervision_steps": 16.0,
+      "per_dataset": {
+        "squad": 16.0,
+        "hotpotqa": 16.0,
+        "drop": 16.0
+      }
+    },
+    "accuracy": {
+      "trm_exact_match": 0.5208333333333334,
+      "trm_f1": 0.5375,
+      "baseline_exact_match": 0.4375,
+      "baseline_f1": 0.4375
+    },
+    "validation_samples": [
+      {
+        "question": "Which NFL team represented the AFC at Super Bowl 50?",
+        "target": "Denver Broncos",
+        "baseline": "Denver Broncos",
+        "trm": "Denver Broncos",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "Which NFL team represented the NFC at Super Bowl 50?",
+        "target": "Carolina Panthers",
+        "baseline": "Denver Broncos",
+        "trm": "Carolina Panthers",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "Where did Super Bowl 50 take place?",
+        "target": "Santa Clara, California",
+        "baseline": "Levi's Stadium",
+        "trm": "Levi's Stadium",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "Which NFL team won Super Bowl 50?",
+        "target": "Denver Broncos",
+        "baseline": "Denver Broncos",
+        "trm": "Denver Broncos",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+        "target": "gold",
+        "baseline": "gold",
+        "trm": "gold",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What was the theme of Super Bowl 50?",
+        "target": "\"golden anniversary\"",
+        "baseline": "gold",
+        "trm": "\"golden anniversary\"\"",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What day was the game played on?",
+        "target": "February 7, 2016",
+        "baseline": "February 7, 2016",
+        "trm": "February 7, 2016",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What is the AFC short for?",
+        "target": "American Football Conference",
+        "baseline": "American Football Conference",
+        "trm": "American Football Conference",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What was the theme of Super Bowl 50?",
+        "target": "\"golden anniversary\"",
+        "baseline": "gold",
+        "trm": "\"golden anniversary\"\"",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What does AFC stand for?",
+        "target": "American Football Conference",
+        "baseline": "American Football Conference",
+        "trm": "American Football Conference",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What day was the Super Bowl played on?",
+        "target": "February 7, 2016",
+        "baseline": "February 7, 2016",
+        "trm": "February 7, 2016",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "Who won Super Bowl 50?",
+        "target": "Denver Broncos",
+        "baseline": "Denver Broncos",
+        "trm": "Denver Broncos",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What venue did Super Bowl 50 take place in?",
+        "target": "Levi's Stadium",
+        "baseline": "Levi's Stadium",
+        "trm": "Levi's Stadium",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "What city did Super Bowl 50 take place in?",
+        "target": "Santa Clara",
+        "baseline": "Santa Clara",
+        "trm": "Santa Clara, California",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "If Roman numerals were used, what would Super Bowl 50 have been called?",
+        "target": "Super Bowl L",
+        "baseline": "Super Bowl L",
+        "trm": "Super Bowl L",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "Super Bowl 50 decided the NFL champion for what season?",
+        "target": "2015",
+        "baseline": "2015",
+        "trm": "2015",
+        "supervision_steps": 16,
+        "source": "squad"
+      },
+      {
+        "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+        "target": "yes",
+        "baseline": "yes",
+        "trm": "yes",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+        "target": "Chief of Protocol",
+        "baseline": "Lord High Treasurer",
+        "trm": "Lord High Treasurer",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+        "target": "Animorphs",
+        "baseline": "Animorphs",
+        "trm": "\"Animorphs\"\"",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
+        "target": "no",
+        "baseline": "no",
+        "trm": "no",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "The director of the romantic comedy \"Big Stone Gap\" is based in what New York city?",
+        "target": "Greenwich Village, New York City",
+        "baseline": "Virginia",
+        "trm": "Virginia",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "2014 S/S is the debut album of a South Korean boy group that was formed by who?",
+        "target": "YG Entertainment",
+        "baseline": "WINNER",
+        "trm": "WINNER",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?",
+        "target": "Eenasul Fateh",
+        "baseline": "Clifford Smith",
+        "trm": "Clifford Smith",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "The arena where the Lewiston Maineiacs played their home games can seat how many people?",
+        "target": "3,677 seated",
+        "baseline": "7,201",
+        "trm": "7,201-seat",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Who is older, Annie Morton or Terry Richardson?",
+        "target": "Terry Richardson",
+        "baseline": "Annie Morton",
+        "trm": "Annie Morton",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Are Local H and For Against both from the United States?",
+        "target": "yes",
+        "baseline": "no",
+        "trm": "no",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
+        "target": "Kansas Song",
+        "baseline": "\"I'm a Champion\"",
+        "trm": "\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "What screenwriter with credits for \"Evolution\" co-wrote a film starring Nicolas Cage and T\u00e9a Leoni?",
+        "target": "David Weissman",
+        "baseline": "Dominic Sena",
+        "trm": "Dominic Sena",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?",
+        "target": "1999",
+        "baseline": "1987",
+        "trm": "1986",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
+        "target": "no",
+        "baseline": "yes",
+        "trm": "yes",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "The football manager who recruited David Beckham managed Manchester United during what timeframe?",
+        "target": "from 1986 to 2013",
+        "baseline": "1995\u201396",
+        "trm": "1995\u201396",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
+        "target": "9,984",
+        "baseline": "United States",
+        "trm": "United States",
+        "supervision_steps": 16,
+        "source": "hotpotqa"
+      },
+      {
+        "question": "Who scored the first touchdown of the game?",
+        "target": "Chaz Schilens",
+        "baseline": "Chaz Schilens",
+        "trm": "Chaz Schilens",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many field goals did Kris Brown kick?",
+        "target": "2",
+        "baseline": "2",
+        "trm": "2",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "Which team won the game?",
+        "target": "Raiders",
+        "baseline": "Raiders",
+        "trm": "Raiders",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many field goals did both teams kick in the first half?",
+        "target": "2",
+        "baseline": "2",
+        "trm": "2",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many more yards was Kris Browns's first field goal over his second?",
+        "target": "29",
+        "baseline": "20",
+        "trm": "24",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "Who threw the longest pass?",
+        "target": "JaMarcus Russell",
+        "baseline": "JaMarcus Russell",
+        "trm": "JaMarcus Russell",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many yards was the longest touchdown of the game?",
+        "target": "80-yard punt return",
+        "baseline": "80",
+        "trm": "80",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many field goals did Sebastian Janikowski and Kris Brown both score each?",
+        "target": "2",
+        "baseline": "2",
+        "trm": "2",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many yards difference is there between Sebastian Janikowski's longest field goal and his shortest field goal?",
+        "target": "3",
+        "baseline": "7",
+        "trm": "0",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many yards difference is there between Kris Brown's longest and shortest field goals?",
+        "target": "29",
+        "baseline": "7",
+        "trm": "0",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many yards longer was the 80-yard punt than the touchdown pass from Russell to Johnnie Lee Higgins?",
+        "target": "51",
+        "baseline": "10",
+        "trm": "0",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many touchdowns were scored in the game?",
+        "target": "4",
+        "baseline": "3",
+        "trm": "4",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many of the touchdowns were passing touchdowns?",
+        "target": "2",
+        "baseline": "3",
+        "trm": "2",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many yards was the longest passing touchdown?",
+        "target": "29",
+        "baseline": "80",
+        "trm": "80",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many yards longer was the longest passing touchdown than the shortest?",
+        "target": "9",
+        "baseline": "80",
+        "trm": "80",
+        "supervision_steps": 16,
+        "source": "drop"
+      },
+      {
+        "question": "How many field goals were scored in the game?",
+        "target": "5",
+        "baseline": "3",
+        "trm": "4",
+        "supervision_steps": 16,
+        "source": "drop"
+      }
+    ]
   }
 ]
