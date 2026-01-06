@@ -4,19 +4,29 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
-## [IMPLEMENTED] 2026-01-05: Full Gradient Flow - Remove Detach (Fix 3)
+## [RESULTS] 2026-01-06: Full Gradient Flow - Remove Detach (Fix 3)
 
-**Status**: Implemented (testing GPU memory)
-
-### Motivation
-Q-head fixes showed differentiation only in epoch 1, then collapsed. Removing detach() may allow sustained gradient flow to keep Q-head learning throughout training.
+**Status**: Completed - Did Not Improve Differentiation
 
 ### Changes
-- Removed `zH.detach()`, `zL.detach()`, and `memory.detach()` from ACT loop in `train.py`
+- Removed `zH.detach()`, `zL.detach()`, and `memory.detach()` from ACT loop
 - Full gradient flow through all reasoning segments
 
-### Risk
-Higher GPU memory usage. If OOM, will need to reduce batch size or max segments.
+### Training Results
+| Metric | Fix 3 (Full Gradient) | Previous (with detach) |
+|--------|----------------------|-------------------------|
+| Best HRM EM | 52.1% (epoch 2) | 52.1% (epoch 1) |
+| Segments | 2.0 (constant always) | 2.67 → 2.0 |
+| Per-Dataset Diff | ❌ None at any epoch | ✅ Epoch 1 only |
+| GPU Memory | ✅ Handled | ✅ OK |
+
+### Key Finding
+> [!WARNING]
+> Full gradient flow actually **removed** the initial differentiation that was present with detach().
+> All datasets used exactly 2 segments from epoch 1 onwards with no variation.
+
+### Interpretation
+The conflicting gradients from full backprop may have averaged out Q-head's ability to differentiate. The detached version preserved more initial variation. **Recommendation**: Revert to detached version if differentiation is desired.
 
 ---
 
