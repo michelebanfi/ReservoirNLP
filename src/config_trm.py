@@ -29,7 +29,9 @@ class TRMConfig:
     # ACT (Adaptive Computation Time) - Simplified
     # TRM uses simple BCE loss: q_hat predicts (y_hat == y_true)
     # No ponder cost needed, no extra forward pass for Q-learning
-    Q_HEAD_BIAS_INIT = 0.0    # sigmoid(0) = 0.5, neutral init
+    Q_HEAD_BIAS_INIT = -1.0   # sigmoid(-1) ≈ 0.27, encourage continuing initially
+    Q_HEAD_LR_MULTIPLIER = 0.1  # Q-head learns 10x slower to prevent dominating
+    MIN_SUPERVISION_STEPS = 3   # Minimum steps before early stopping allowed
     
     # Training
     DROPOUT = 0.1

@@ -329,7 +329,8 @@ def train_step(model, batch, optimizer, config, ema=None):
         supervision_steps = step + 1
         
         # Early stopping: if model predicts answer is correct
-        if q_hat.mean().item() > 0.5:
+        # Only allow halting after minimum supervision steps
+        if step >= config.MIN_SUPERVISION_STEPS - 1 and q_hat.mean().item() > 0.5:
             break
     
     return {
@@ -374,12 +375,17 @@ def train_main():
     # Data loaders
     train_loader, val_loader = get_dataloaders(tokenizer, config)
     
-    # Optimizer
-    optimizer = torch.optim.AdamW(
-        model.parameters(), 
-        lr=config.LEARNING_RATE, 
-        weight_decay=config.WEIGHT_DECAY
-    )
+    # Optimizer with separate Q-head learning rate
+    # Q-head learns slower to prevent dominating after T5 unfreezing
+    q_head_params = list(model.trm_core.q_head.parameters())
+    q_head_ids = set(id(p) for p in q_head_params)
+    other_params = [p for p in model.parameters() if id(p) not in q_head_ids]
+    
+    optimizer = torch.optim.AdamW([
+        {'params': other_params, 'lr': config.LEARNING_RATE},
+        {'params': q_head_params, 'lr': config.LEARNING_RATE * config.Q_HEAD_LR_MULTIPLIER},
+    ], weight_decay=config.WEIGHT_DECAY)
+    print(f"Optimizer: Q-head LR = {config.LEARNING_RATE * config.Q_HEAD_LR_MULTIPLIER:.2e} ({config.Q_HEAD_LR_MULTIPLIER}x main)")
     
     print("\nStarting Training...")
     metrics_history = []

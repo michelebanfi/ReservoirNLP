@@ -4,6 +4,40 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [IMPLEMENTED] 2026-01-07: TRM ACT Fixes - Prevent Supervision Step Collapse
+
+**Status**: Implemented
+
+### Problem
+After T5 unfreezing at epoch 3, supervision steps collapsed from 12-16 to exactly 1.0 and never recovered. The Q-head learned to immediately predict "correct" (q_hat > 0.5), bypassing all recursive reasoning. Final TRM EM dropped to 33% (below baseline 43.75%).
+
+### Root Cause Analysis
+1. **Q-head overpowers during joint training** - Same LR as T5 caused Q-head gradients to dominate after unfreezing
+2. **No minimum steps** - Early stopping triggered at step 1 when q_hat > 0.5
+3. **Neutral Q-head bias** - sigmoid(0)=0.5 made it too easy to halt
+
+### Changes
+
+1. **Separate Q-head Learning Rate** (`config_trm.py`, `train_trm.py`):
+   - Added `Q_HEAD_LR_MULTIPLIER = 0.1` (10x slower than main LR)
+   - Optimizer now uses param groups to apply different LRs
+
+2. **Minimum Supervision Steps** (`config_trm.py`, `train_trm.py`):
+   - Added `MIN_SUPERVISION_STEPS = 3`
+   - Early stopping only allowed after completing minimum steps
+
+3. **Q-head Bias Init** (`config_trm.py`):
+   - Changed `Q_HEAD_BIAS_INIT`: 0.0 → -1.0
+   - sigmoid(-1) ≈ 0.27 encourages continuing initially
+
+### Expected Behavior
+- Supervision steps should stay ≥3 throughout training
+- Steps should vary based on task difficulty (not stuck at minimum)
+- HotpotQA/DROP should use more steps than SQuAD
+
+---
+
+
 ## [RESULTS] 2026-01-06: Full Gradient Flow - Remove Detach (Fix 3)
 
 **Status**: Completed - Did Not Improve Differentiation
