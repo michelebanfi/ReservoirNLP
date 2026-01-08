@@ -4,6 +4,42 @@ This file documents all architectural edits to the T5-HRM model, including the m
 
 ---
 
+## [EXPERIMENT] 2026-01-08: TRM Capacity Scaling - 2 → 6 Layers
+
+**Status**: In Progress
+
+### Problem
+Despite ACT fixes (Q-head LR, min steps, bias init), supervision steps still collapsed to 1 after T5 unfreezing. Analysis suggests the 2-layer TRM core (~15-18M params) has **insufficient capacity** to:
+1. Learn multi-hop reasoning patterns (HotpotQA, DROP)
+2. Maintain learned policies when competing with T5's 220M param gradients
+3. Develop task-specific halting behavior
+
+### Evidence from Training (trm_metrics.json)
+| Epoch | Supervision Steps | TRM EM | Observation |
+|-------|-------------------|--------|-------------|
+| 1-2 | 16 (max) | 41.7% | Steps stuck at max, no differentiation |
+| 3+ | **1 (collapse)** | ~33% | Q-head immediately halts, worse than baseline |
+
+Key failure: After T5 unfreeze, TRM core gets "drowned out" by T5's much larger gradient signal.
+
+### Changes
+1. **Scaled TRM Core** (`config_trm.py`):
+   - `N_LAYERS`: 2 → 6 (3x more capacity)
+   - Estimated new TRM params: ~45-50M (vs previous ~15M)
+
+### Hypothesis
+With more capacity, the TRM core should:
+- Maintain distinct reasoning paths for different question types
+- Resist gradient interference from T5 during joint training
+- Learn meaningful halting behavior (not just "always halt" or "never halt")
+
+### Expected Behavior
+- Supervision steps should differentiate by dataset difficulty
+- TRM EM should exceed baseline consistently
+- Q-head should learn input-dependent halting
+
+---
+
 ## [IMPLEMENTED] 2026-01-07: TRM ACT Fixes - Prevent Supervision Step Collapse
 
 **Status**: Implemented

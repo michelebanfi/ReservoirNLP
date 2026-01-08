@@ -17,7 +17,8 @@ class TRMConfig:
     N_HEADS = 12
     
     # TRM Architecture (Paper: Table 1 - best config T=3, n=6, 2 layers)
-    N_LAYERS = 2              # Tiny: only 2 transformer layers (paper key finding)
+    # Scaled up from 2 -> 6 layers for multi-hop QA which is harder than paper's task
+    N_LAYERS = 6              # Scaled: 6 transformer layers (was 2, too small for task)
     N_RECURSIONS = 6          # n: latent recursion steps per deep recursion
     T_DEEP_RECURSIONS = 3     # T: total deep recursions (T-1 no-grad + 1 with-grad)
     N_SUPERVISION = 16        # Deep supervision steps (same as HRM)
