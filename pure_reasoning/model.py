@@ -6,6 +6,8 @@ Three components:
 1. Encoder (from scratch)
 2. Reasoning Core (TRM-style recursive)
 3. Task Heads (span, classification)
+
+Note: CUDA workaround is set in run_pure_reasoning.py, not here.
 """
 import torch
 import torch.nn as nn

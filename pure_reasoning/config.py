@@ -31,7 +31,7 @@ class PureReasoningConfig:
     MAX_ANSWER_SPAN = 50      # Maximum span length
     
     # ============== Training ==============
-    BATCH_SIZE = 16           # Can be larger without decoder
+    BATCH_SIZE = 8            # Reduced for OOM workaround (no caching allocator)
     LEARNING_RATE = 3e-4      # Can be higher from scratch
     WEIGHT_DECAY = 0.01
     WARMUP_STEPS = 1000
