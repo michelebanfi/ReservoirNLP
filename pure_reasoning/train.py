@@ -215,22 +215,6 @@ def train_main(args=None):
     # Load data
     train_loader, val_loader, tokenizer = get_span_dataloaders(config)
     
-    # CUDA warmup - load a small pretrained model to properly initialize CUDA context
-    # This mimics what TRM does with T5 loading, which seems to prevent NVML errors
-    if config.DEVICE == "cuda":
-        print("Warming up CUDA with pretrained model...")
-        from transformers import AutoModel
-        _warmup = AutoModel.from_pretrained("prajjwal1/bert-tiny").to(config.DEVICE)
-        _dummy = torch.randn(1, 16, device=config.DEVICE)
-        with torch.no_grad():
-            try:
-                _warmup.embeddings(_dummy.long().clamp(0, 100))
-            except:
-                pass
-        del _warmup, _dummy
-        torch.cuda.empty_cache()
-        print("CUDA warmup complete.")
-    
     # Create model
     print(f"\nUsing device: {config.DEVICE}")
     model = PureReasoningModel(config).to(config.DEVICE)
