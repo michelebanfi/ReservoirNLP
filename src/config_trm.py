@@ -21,7 +21,7 @@ class TRMConfig:
     N_LAYERS = 6              # Scaled: 6 transformer layers (was 2, too small for task)
     N_RECURSIONS = 6          # n: latent recursion steps per deep recursion
     T_DEEP_RECURSIONS = 3     # T: total deep recursions (T-1 no-grad + 1 with-grad)
-    N_SUPERVISION = 16        # Deep supervision steps (same as HRM)
+    N_SUPERVISION = 8         # Deep supervision steps (reduced from 16 for faster training)
     
     # EMA (Exponential Moving Average on weights)
     USE_EMA = True

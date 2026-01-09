@@ -162,7 +162,8 @@ def run_validation_comparison(model, tokenizer, samples, epoch, ema=None):
                 supervision_steps = step + 1
                 
                 # Early stopping if model predicts answer is correct
-                if q_hat.mean().item() > 0.5:
+                # Only after minimum steps (matches training logic)
+                if step >= config.MIN_SUPERVISION_STEPS - 1 and q_hat.mean().item() > 0.5:
                     break
             
             all_supervision_steps.append(supervision_steps)
