@@ -18,7 +18,7 @@ class PureReasoningConfig:
     # ============== Reasoning Core (TRM-style) ==============
     N_RECURSIONS = 4          # Latent recursion steps per deep step
     T_DEEP_RECURSIONS = 3     # Deep recursion iterations
-    N_SUPERVISION = 6         # Max supervision steps
+    N_SUPERVISION = 4         # Max supervision steps
     MIN_SUPERVISION_STEPS = 2 # Minimum before early stopping
     
     # ACT (Adaptive Computation Time)

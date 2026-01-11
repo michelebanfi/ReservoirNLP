@@ -135,8 +135,12 @@ class SpanQADataset(Dataset):
         end_position = -1
         
         if item['answer_type'] == 0 and answer_text:  # Span answer
-            # Find where answer appears in context
-            answer_start_char = context.lower().find(answer_text.lower())
+            # Use provided answer_start if available (SQuAD), otherwise search
+            if item['answer_start'] >= 0:
+                answer_start_char = item['answer_start']
+            else:
+                answer_start_char = context.lower().find(answer_text.lower())
+
             if answer_start_char != -1:
                 answer_end_char = answer_start_char + len(answer_text)
                 
@@ -150,11 +154,17 @@ class SpanQADataset(Dataset):
                         end_position = i
                         break
         
-        # Clamp to valid range
-        if start_position < 0:
-            start_position = 0
-        if end_position < 0 or end_position < start_position:
-            end_position = start_position
+        # For span-type answers, clamp to valid range
+        # For non-span (yes/no), keep -1 to mask in loss
+        if item['answer_type'] == 0:  # span answer
+            if start_position < 0:
+                start_position = 0
+            if end_position < 0 or end_position < start_position:
+                end_position = start_position
+        else:
+            # Non-span: mark as -1 to ignore in span loss
+            start_position = -1
+            end_position = -1
         
         return {
             'input_ids': input_ids,

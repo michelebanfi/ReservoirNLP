@@ -119,6 +119,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
     device = config.DEVICE
     
     total_span_loss = 0
+    total_class_loss = 0
     total_act_loss = 0
     total_steps = 0
     batches = 0
@@ -132,16 +133,18 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
         attention_mask = batch['attention_mask'].to(device)
         start_positions = batch['start_positions'].to(device)
         end_positions = batch['end_positions'].to(device)
+        answer_types = batch['answer_types'].to(device)
         
         outputs = model(
             input_ids, 
             attention_mask,
             start_positions=start_positions,
             end_positions=end_positions,
+            answer_type=answer_types,
         )
         
-        # Combined loss
-        loss = outputs['span_loss'] + 0.1 * outputs['act_loss']
+        # Combined loss (span + classification + ACT)
+        loss = outputs['span_loss'] + outputs['class_loss'] + 0.1 * outputs['act_loss']
         
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), config.GRADIENT_CLIP)
@@ -151,18 +154,21 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
             scheduler.step()
         
         total_span_loss += outputs['span_loss'].item() if torch.is_tensor(outputs['span_loss']) else outputs['span_loss']
+        total_class_loss += outputs['class_loss'].item() if torch.is_tensor(outputs['class_loss']) else outputs['class_loss']
         total_act_loss += outputs['act_loss'].item() if torch.is_tensor(outputs['act_loss']) else outputs['act_loss']
         total_steps += outputs['supervision_steps']
         batches += 1
         
         pbar.set_postfix({
             'span': f"{outputs['span_loss']:.3f}" if torch.is_tensor(outputs['span_loss']) else f"{outputs['span_loss']:.3f}",
+            'cls': f"{outputs['class_loss']:.3f}" if torch.is_tensor(outputs['class_loss']) else f"{outputs['class_loss']:.3f}",
             'act': f"{outputs['act_loss']:.3f}" if torch.is_tensor(outputs['act_loss']) else f"{outputs['act_loss']:.3f}",
             'steps': outputs['supervision_steps'],
         })
     
     return {
         'span_loss': total_span_loss / batches,
+        'class_loss': total_class_loss / batches,
         'act_loss': total_act_loss / batches,
         'avg_steps': total_steps / batches,
     }
