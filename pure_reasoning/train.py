@@ -2,7 +2,7 @@
 Pure Reasoning Architecture - Training Script
 
 Trains the pure reasoning model on QA datasets.
-No next-token prediction, uses span prediction loss.
+Uses cross-entropy loss for text generation.
 """
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -17,32 +17,44 @@ import torch.nn as nn
 import torch.nn.functional as F
 import json
 import argparse
+import random
 from tqdm import tqdm
 
 from .config import PureReasoningConfig
 from .model import PureReasoningModel
-from .dataset import get_span_dataloaders
+from .dataset import get_dataloaders
 
 
-def compute_span_f1(pred_start, pred_end, true_start, true_end):
-    """Compute span-level F1 score"""
-    # Get predicted and true spans
-    pred_set = set(range(pred_start, pred_end + 1))
-    true_set = set(range(true_start, true_end + 1))
+def compute_text_metrics(pred_text, gold_text):
+    """
+    Compute exact match and F1 for text strings.
+    """
+    # Normalize: lowercase, strip
+    pred_text = pred_text.lower().strip()
+    gold_text = gold_text.lower().strip()
     
-    if len(pred_set) == 0 or len(true_set) == 0:
-        return float(pred_set == true_set)
+    # Exact match
+    em = float(pred_text == gold_text)
     
-    intersection = pred_set & true_set
-    precision = len(intersection) / len(pred_set)
-    recall = len(intersection) / len(true_set)
+    # F1: token overlap
+    pred_tokens = pred_text.split()
+    gold_tokens = gold_text.split()
     
-    if precision + recall == 0:
-        return 0.0
-    return 2 * precision * recall / (precision + recall)
+    if len(pred_tokens) == 0 or len(gold_tokens) == 0:
+        return em, float(pred_text == gold_text)
+    
+    common = set(pred_tokens) & set(gold_tokens)
+    if len(common) == 0:
+        return em, 0.0
+    
+    precision = len(common) / len(pred_tokens)
+    recall = len(common) / len(gold_tokens)
+    f1 = 2 * precision * recall / (precision + recall)
+    
+    return em, f1
 
 
-def run_validation(model, val_loader, config):
+def run_validation(model, val_loader, tokenizer, config, num_samples_to_log=5):
     """Run validation and compute metrics"""
     model.eval()
     device = config.DEVICE
@@ -53,63 +65,72 @@ def run_validation(model, val_loader, config):
     per_dataset = {}
     all_steps = []
     
+    # Collect sample generations for logging
+    sample_generations = []
+    
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="Validating"):
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            start_positions = batch['start_positions'].to(device)
-            end_positions = batch['end_positions'].to(device)
             sources = batch['sources']
+            raw_questions = batch['raw_questions']
+            raw_answers = batch['raw_answers']
             
-            outputs = model(input_ids, attention_mask, 
-                          start_positions, end_positions)
-            
-            pred_starts = outputs['start_logits'].argmax(dim=-1)
-            pred_ends = outputs['end_logits'].argmax(dim=-1)
-            
-            all_steps.append(outputs['supervision_steps'])
+            # Generate predictions
+            generated_ids = model.generate(input_ids, attention_mask, tokenizer, 
+                                           max_len=config.MAX_ANSWER_LEN)
             
             for i in range(input_ids.size(0)):
-                ps = pred_starts[i].item()
-                pe = pred_ends[i].item()
-                ts = start_positions[i].item()
-                te = end_positions[i].item()
-                source = sources[i]
+                # Decode prediction
+                pred_ids = generated_ids[i].tolist()
+                # Remove special tokens for display
+                pred_text = tokenizer.decode(pred_ids, skip_special_tokens=True)
+                gold_text = raw_answers[i]
                 
-                # Exact match
-                em = float(ps == ts and pe == te)
-                f1 = compute_span_f1(ps, pe, ts, te)
+                em, f1 = compute_text_metrics(pred_text, gold_text)
                 
                 total_em += em
                 total_f1 += f1
                 total_samples += 1
                 
+                source = sources[i]
+                
                 # Per-dataset tracking
                 if source not in per_dataset:
-                    per_dataset[source] = {'em': 0, 'f1': 0, 'n': 0, 'steps': []}
+                    per_dataset[source] = {'em': 0, 'f1': 0, 'n': 0}
                 per_dataset[source]['em'] += em
                 per_dataset[source]['f1'] += f1
                 per_dataset[source]['n'] += 1
-                per_dataset[source]['steps'].append(outputs['supervision_steps'])
+                
+                # Collect samples for logging
+                if len(sample_generations) < num_samples_to_log * 3:  # Collect more, sample later
+                    sample_generations.append({
+                        'source': source,
+                        'question': raw_questions[i][:200],  # Truncate for readability
+                        'gold': gold_text,
+                        'predicted': pred_text[:200],
+                    })
+    
+    # Sample random generations to log
+    if len(sample_generations) > num_samples_to_log:
+        sample_generations = random.sample(sample_generations, num_samples_to_log)
     
     # Aggregate
     avg_em = total_em / total_samples if total_samples > 0 else 0
     avg_f1 = total_f1 / total_samples if total_samples > 0 else 0
-    avg_steps = sum(all_steps) / len(all_steps) if all_steps else 0
     
     per_dataset_summary = {}
     for ds, metrics in per_dataset.items():
         per_dataset_summary[ds] = {
             'em': metrics['em'] / metrics['n'] if metrics['n'] > 0 else 0,
             'f1': metrics['f1'] / metrics['n'] if metrics['n'] > 0 else 0,
-            'avg_steps': sum(metrics['steps']) / len(metrics['steps']) if metrics['steps'] else 0,
         }
     
     return {
         'exact_match': avg_em,
         'f1': avg_f1,
-        'avg_steps': avg_steps,
         'per_dataset': per_dataset_summary,
+        'sample_generations': sample_generations,
     }
 
 
@@ -118,8 +139,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
     model.train()
     device = config.DEVICE
     
-    total_span_loss = 0
-    total_class_loss = 0
+    total_loss = 0
     total_act_loss = 0
     total_steps = 0
     batches = 0
@@ -131,20 +151,17 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
         
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
-        start_positions = batch['start_positions'].to(device)
-        end_positions = batch['end_positions'].to(device)
-        answer_types = batch['answer_types'].to(device)
+        decoder_input_ids = batch['decoder_input_ids'].to(device)
+        labels = batch['labels'].to(device)
         
         outputs = model(
             input_ids, 
             attention_mask,
-            start_positions=start_positions,
-            end_positions=end_positions,
-            answer_type=answer_types,
+            decoder_input_ids=decoder_input_ids,
+            labels=labels,
         )
         
-        # Combined loss (span + classification + ACT)
-        loss = outputs['span_loss'] + outputs['class_loss'] + 0.1 * outputs['act_loss']
+        loss = outputs['loss']
         
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), config.GRADIENT_CLIP)
@@ -153,22 +170,18 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
         if scheduler is not None:
             scheduler.step()
         
-        total_span_loss += outputs['span_loss'].item() if torch.is_tensor(outputs['span_loss']) else outputs['span_loss']
-        total_class_loss += outputs['class_loss'].item() if torch.is_tensor(outputs['class_loss']) else outputs['class_loss']
-        total_act_loss += outputs['act_loss'].item() if torch.is_tensor(outputs['act_loss']) else outputs['act_loss']
+        total_loss += loss.item()
+        total_act_loss += outputs['act_loss'] if isinstance(outputs['act_loss'], (int, float)) else outputs['act_loss'].item()
         total_steps += outputs['supervision_steps']
         batches += 1
         
         pbar.set_postfix({
-            'span': f"{outputs['span_loss']:.3f}" if torch.is_tensor(outputs['span_loss']) else f"{outputs['span_loss']:.3f}",
-            'cls': f"{outputs['class_loss']:.3f}" if torch.is_tensor(outputs['class_loss']) else f"{outputs['class_loss']:.3f}",
-            'act': f"{outputs['act_loss']:.3f}" if torch.is_tensor(outputs['act_loss']) else f"{outputs['act_loss']:.3f}",
+            'loss': f"{loss.item():.3f}",
             'steps': outputs['supervision_steps'],
         })
     
     return {
-        'span_loss': total_span_loss / batches,
-        'class_loss': total_class_loss / batches,
+        'loss': total_loss / batches,
         'act_loss': total_act_loss / batches,
         'avg_steps': total_steps / batches,
     }
@@ -198,8 +211,8 @@ def train_main(args=None):
     args = parser.parse_args(args)
     
     print("=" * 60)
-    print("Pure Reasoning Architecture Training")
-    print("No T5, No Next-Token Prediction")
+    print("Pure Reasoning Architecture Training (Generative)")
+    print("Encoder + ReasoningCore + Decoder")
     print("=" * 60)
     
     config = PureReasoningConfig()
@@ -219,7 +232,7 @@ def train_main(args=None):
     os.makedirs(os.path.dirname(config.MODEL_SAVE_PATH), exist_ok=True)
     
     # Load data
-    train_loader, val_loader, tokenizer = get_span_dataloaders(config)
+    train_loader, val_loader, tokenizer = get_dataloaders(config)
     
     # Create model
     print(f"\nUsing device: {config.DEVICE}")
@@ -228,7 +241,7 @@ def train_main(args=None):
     print(f"\nModel Parameters: {metrics['total_params_M']:.2f}M")
     print(f"  Encoder: {metrics['encoder_params_M']:.2f}M")
     print(f"  Reasoning: {metrics['reasoning_params_M']:.2f}M")
-    print(f"  Heads: {metrics['heads_params_M']:.2f}M")
+    print(f"  Decoder: {metrics['decoder_params_M']:.2f}M")
     
     # Resume if specified
     start_epoch = 0
@@ -259,22 +272,34 @@ def train_main(args=None):
         train_metrics = train_epoch(model, train_loader, optimizer, scheduler, config, epoch)
         
         # Validate
-        val_metrics = run_validation(model, val_loader, config)
+        val_metrics = run_validation(model, val_loader, tokenizer, config)
         
         # Print summary
         print(f"\nEpoch {epoch+1} Summary:")
-        print(f"  Span Loss: {train_metrics['span_loss']:.4f}, ACT Loss: {train_metrics['act_loss']:.4f}")
+        print(f"  Train Loss: {train_metrics['loss']:.4f}")
         print(f"  Avg Steps: {train_metrics['avg_steps']:.2f}")
         print(f"  Val EM: {val_metrics['exact_match']:.2%}, Val F1: {val_metrics['f1']:.2%}")
         print("  Per-Dataset:")
         for ds, m in val_metrics['per_dataset'].items():
-            print(f"    {ds}: EM={m['em']:.2%}, F1={m['f1']:.2%}, Steps={m['avg_steps']:.1f}")
+            print(f"    {ds}: EM={m['em']:.2%}, F1={m['f1']:.2%}")
+        
+        # Print sample generations
+        print("\n  Sample Generations:")
+        for sample in val_metrics['sample_generations'][:3]:
+            print(f"    [{sample['source']}] Q: {sample['question'][:80]}...")
+            print(f"      Gold: {sample['gold']}")
+            print(f"      Pred: {sample['predicted']}")
         
         # Save metrics
         epoch_metrics = {
             'epoch': epoch + 1,
             'train': train_metrics,
-            'val': val_metrics,
+            'val': {
+                'exact_match': val_metrics['exact_match'],
+                'f1': val_metrics['f1'],
+                'per_dataset': val_metrics['per_dataset'],
+                'sample_generations': val_metrics['sample_generations'],
+            },
         }
         metrics_history.append(epoch_metrics)
         

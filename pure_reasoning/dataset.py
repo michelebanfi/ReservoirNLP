@@ -1,8 +1,8 @@
 """
 Pure Reasoning Architecture - Dataset
 
-Loads QA datasets formatted for span prediction.
-Returns start/end positions instead of labels for generation.
+Loads QA datasets formatted for text generation.
+Returns encoder inputs and decoder targets (answer text).
 """
 import torch
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
@@ -10,23 +10,30 @@ from transformers import AutoTokenizer
 from datasets import load_dataset
 
 
-class SpanQADataset(Dataset):
+class GenerativeQADataset(Dataset):
     """
-    QA dataset formatted for span prediction.
+    QA dataset formatted for text generation.
     
     Returns:
         input_ids: [L] tokenized [CLS] context [SEP] question [SEP]
         attention_mask: [L] 1=valid, 0=padding
-        start_position: int, start of answer span in input_ids
-        end_position: int, end of answer span in input_ids
-        answer_type: 0=span, 1=yes, 2=no
+        decoder_input_ids: [T] answer tokens shifted right (starts with [CLS])
+        labels: [T] answer tokens for loss (ends with [SEP])
         source: dataset name
+        raw_question: original question text
+        raw_answer: original answer text
     """
     def __init__(self, tokenizer, dataset_name, split, config, max_samples=None):
         self.tokenizer = tokenizer
         self.dataset_name = dataset_name
         self.config = config
         self.max_len = config.MAX_CONTEXT_LEN
+        self.max_answer_len = config.MAX_ANSWER_LEN
+        
+        # Special tokens
+        self.bos_id = tokenizer.cls_token_id  # [CLS] as BOS
+        self.eos_id = tokenizer.sep_token_id  # [SEP] as EOS
+        self.pad_id = tokenizer.pad_token_id
         
         # Load dataset
         self.items = []
@@ -39,14 +46,14 @@ class SpanQADataset(Dataset):
             for item in ds:
                 if max_samples and len(self.items) >= max_samples:
                     break
-                self.items.append({
-                    'context': item['context'],
-                    'question': item['question'],
-                    'answer_text': item['answers']['text'][0] if item['answers']['text'] else "",
-                    'answer_start': item['answers']['answer_start'][0] if item['answers']['answer_start'] else -1,
-                    'answer_type': 0,  # span
-                    'source': 'squad',
-                })
+                answer_text = item['answers']['text'][0] if item['answers']['text'] else ""
+                if answer_text:  # Skip empty answers
+                    self.items.append({
+                        'context': item['context'],
+                        'question': item['question'],
+                        'answer_text': answer_text,
+                        'source': 'squad',
+                    })
         
         elif name == 'hotpotqa':
             ds = load_dataset('hotpot_qa', 'distractor', split=split, trust_remote_code=True)
@@ -60,23 +67,14 @@ class SpanQADataset(Dataset):
                     context_parts.append(f"{title}: {' '.join(sentences)}")
                 context = " ".join(context_parts)
                 
-                # Determine answer type
                 answer = item['answer']
-                if answer.lower() == 'yes':
-                    answer_type = 1
-                elif answer.lower() == 'no':
-                    answer_type = 2
-                else:
-                    answer_type = 0  # span
-                
-                self.items.append({
-                    'context': context[:4000],  # Truncate long contexts
-                    'question': item['question'],
-                    'answer_text': answer,
-                    'answer_start': -1,  # Will find in tokenization
-                    'answer_type': answer_type,
-                    'source': 'hotpotqa',
-                })
+                if answer:  # Skip empty
+                    self.items.append({
+                        'context': context[:4000],  # Truncate long contexts
+                        'question': item['question'],
+                        'answer_text': answer,
+                        'source': 'hotpotqa',
+                    })
         
         elif name == 'drop':
             ds = load_dataset('drop', split=split, trust_remote_code=True)
@@ -91,14 +89,12 @@ class SpanQADataset(Dataset):
                 elif item['answer']['number']:
                     answer_text = item['answer']['number']
                 else:
-                    continue  # Skip if no extractable answer
+                    continue  # Skip if no answer
                 
                 self.items.append({
                     'context': item['passage'],
                     'question': item['question'],
                     'answer_text': str(answer_text),
-                    'answer_start': -1,
-                    'answer_type': 0,  # span
                     'source': 'drop',
                 })
         
@@ -110,76 +106,71 @@ class SpanQADataset(Dataset):
     def __getitem__(self, idx):
         item = self.items[idx]
         
-        # Tokenize: [CLS] context [SEP] question [SEP]
         context = item['context']
         question = item['question']
         answer_text = item['answer_text']
         
-        # Encode with special tokens
+        # Encode input: [CLS] context [SEP] question [SEP]
         encoding = self.tokenizer(
             context,
             question,
             max_length=self.max_len,
             padding='max_length',
-            truncation='only_first',  # Truncate context, keep question
+            truncation='only_first',
             return_tensors='pt',
-            return_offsets_mapping=True,
         )
         
         input_ids = encoding['input_ids'].squeeze(0)
         attention_mask = encoding['attention_mask'].squeeze(0)
-        offset_mapping = encoding['offset_mapping'].squeeze(0)
         
-        # Find answer span in tokenized input
-        start_position = -1
-        end_position = -1
+        # Encode answer for decoder
+        # Tokenizer returns: [CLS] answer_tokens [SEP] [PAD]...
+        answer_encoding = self.tokenizer(
+            answer_text,
+            max_length=self.max_answer_len,
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt',
+            add_special_tokens=False,  # Don't add [CLS]/[SEP], we handle them manually
+        )
+        answer_ids = answer_encoding['input_ids'].squeeze(0)  # Just the answer tokens
+        answer_mask = answer_encoding['attention_mask'].squeeze(0)
+        answer_len = answer_mask.sum().item()  # Actual answer token count
         
-        if item['answer_type'] == 0 and answer_text:  # Span answer
-            # Use provided answer_start if available (SQuAD), otherwise search
-            if item['answer_start'] >= 0:
-                answer_start_char = item['answer_start']
-            else:
-                answer_start_char = context.lower().find(answer_text.lower())
-
-            if answer_start_char != -1:
-                answer_end_char = answer_start_char + len(answer_text)
-                
-                # Map character positions to token positions
-                for i, (start_char, end_char) in enumerate(offset_mapping.tolist()):
-                    if start_char is None or end_char is None:
-                        continue
-                    if start_char <= answer_start_char < end_char:
-                        start_position = i
-                    if start_char < answer_end_char <= end_char:
-                        end_position = i
-                        break
+        # decoder_input_ids: [BOS] answer_tokens [PAD]...
+        # labels:            answer_tokens [EOS] [PAD=-100]...
+        # This is standard teacher forcing: predict next token given previous
         
-        # For span-type answers, clamp to valid range
-        # For non-span (yes/no), keep -1 to mask in loss
-        if item['answer_type'] == 0:  # span answer
-            if start_position < 0:
-                start_position = 0
-            if end_position < 0 or end_position < start_position:
-                end_position = start_position
+        decoder_input_ids = torch.full((self.max_answer_len,), self.pad_id, dtype=torch.long)
+        labels = torch.full((self.max_answer_len,), -100, dtype=torch.long)  # -100 = ignore in loss
+        
+        # decoder_input_ids starts with BOS, then answer tokens
+        decoder_input_ids[0] = self.bos_id
+        if answer_len > 0:
+            copy_len = min(answer_len, self.max_answer_len - 1)
+            decoder_input_ids[1:1+copy_len] = answer_ids[:copy_len]
+        
+        # labels are answer tokens shifted left (predict answer from BOS, then EOS)
+        if answer_len > 0:
+            copy_len = min(answer_len, self.max_answer_len - 1)
+            labels[:copy_len] = answer_ids[:copy_len]
+            labels[copy_len] = self.eos_id  # Final token is EOS
         else:
-            # Non-span: mark as -1 to ignore in span loss
-            start_position = -1
-            end_position = -1
+            labels[0] = self.eos_id  # Empty answer: just predict EOS
         
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
-            'start_position': torch.tensor(start_position),
-            'end_position': torch.tensor(end_position),
-            'answer_type': torch.tensor(item['answer_type']),
+            'decoder_input_ids': decoder_input_ids,
+            'labels': labels,
             'source': item['source'],
             'raw_question': question,
             'raw_answer': answer_text,
         }
 
 
-def get_span_dataloaders(config):
-    """Create train and validation dataloaders for span QA"""
+def get_dataloaders(config):
+    """Create train and validation dataloaders for generative QA"""
     tokenizer = AutoTokenizer.from_pretrained(config.TOKENIZER_NAME)
     
     train_datasets = []
@@ -190,8 +181,8 @@ def get_span_dataloaders(config):
     
     for ds_name in config.DATASETS:
         print(f"Loading {ds_name}...")
-        train_ds = SpanQADataset(tokenizer, ds_name, 'train', config, max_samples=samples_per_ds)
-        val_ds = SpanQADataset(tokenizer, ds_name, 'validation', config, max_samples=val_per_ds)
+        train_ds = GenerativeQADataset(tokenizer, ds_name, 'train', config, max_samples=samples_per_ds)
+        val_ds = GenerativeQADataset(tokenizer, ds_name, 'validation', config, max_samples=val_per_ds)
         train_datasets.append(train_ds)
         val_datasets.append(val_ds)
     
@@ -204,10 +195,11 @@ def get_span_dataloaders(config):
         return {
             'input_ids': torch.stack([x['input_ids'] for x in batch]),
             'attention_mask': torch.stack([x['attention_mask'] for x in batch]),
-            'start_positions': torch.stack([x['start_position'] for x in batch]),
-            'end_positions': torch.stack([x['end_position'] for x in batch]),
-            'answer_types': torch.stack([x['answer_type'] for x in batch]),
+            'decoder_input_ids': torch.stack([x['decoder_input_ids'] for x in batch]),
+            'labels': torch.stack([x['labels'] for x in batch]),
             'sources': [x['source'] for x in batch],
+            'raw_questions': [x['raw_question'] for x in batch],
+            'raw_answers': [x['raw_answer'] for x in batch],
         }
     
     train_loader = DataLoader(

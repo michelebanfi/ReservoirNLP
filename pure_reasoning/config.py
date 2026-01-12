@@ -8,46 +8,56 @@ import torch
 
 
 class PureReasoningConfig:
+    # ============== Debug Mode ==============
+    # Set to True for quick validation with tiny model
+    DEBUG_MODE = False
+    
     # ============== Model Dimensions ==============
-    D_MODEL = 512             # Hidden dimension (smaller than T5's 768)
-    N_HEADS = 8               # Attention heads
-    N_ENCODER_LAYERS = 6      # Encoder depth
-    N_REASONING_LAYERS = 4    # Reasoning core depth
-    D_FF = 2048               # Feedforward dimension
+    if DEBUG_MODE:
+        D_MODEL = 128             # Tiny for fast iteration
+        N_HEADS = 4
+        N_ENCODER_LAYERS = 2
+        N_REASONING_LAYERS = 2
+        D_FF = 512
+    else:
+        D_MODEL = 210             # Full size
+        N_HEADS = 6
+        N_ENCODER_LAYERS = 6
+        N_REASONING_LAYERS = 2
+        D_FF = 1024
     
     # ============== Reasoning Core (TRM-style) ==============
-    N_RECURSIONS = 4          # Latent recursion steps per deep step
-    T_DEEP_RECURSIONS = 3     # Deep recursion iterations
-    N_SUPERVISION = 4         # Max supervision steps
-    MIN_SUPERVISION_STEPS = 2 # Minimum before early stopping
+    N_RECURSIONS = 2 if DEBUG_MODE else 4
+    T_DEEP_RECURSIONS = 2 if DEBUG_MODE else 3
+    N_SUPERVISION = 2 if DEBUG_MODE else 4
+    MIN_SUPERVISION_STEPS = 1 if DEBUG_MODE else 2
     
     # ACT (Adaptive Computation Time)
     Q_HEAD_BIAS_INIT = -1.0   # sigmoid(-1) ≈ 0.27, encourage continuing
     Q_HEAD_LR_MULTIPLIER = 0.1
     
-    # ============== Task Heads ==============
-    # Span head: predicts start/end positions
-    # Classification head: yes/no or multi-class
-    MAX_ANSWER_SPAN = 50      # Maximum span length
+    # ============== Generation Settings ==============
+    MAX_ANSWER_LEN = 30 if DEBUG_MODE else 50
+    VOCAB_SIZE = 30522        # BERT tokenizer vocab size
     
     # ============== Training ==============
-    BATCH_SIZE = 8            # Reduced for OOM workaround (no caching allocator)
-    LEARNING_RATE = 3e-4      # Can be higher from scratch
+    BATCH_SIZE = 16 if DEBUG_MODE else 8
+    LEARNING_RATE = 1e-3 if DEBUG_MODE else 3e-4  # Higher LR for debug
     WEIGHT_DECAY = 0.01
-    WARMUP_STEPS = 1000
-    EPOCHS = 50               # More epochs needed from scratch
+    WARMUP_STEPS = 100 if DEBUG_MODE else 1000
+    EPOCHS = 10 if DEBUG_MODE else 50
     GRADIENT_CLIP = 1.0
     DROPOUT = 0.1
     
     # Curriculum: warmup reasoning gradually
-    WARMUP_REASONING_EPOCHS = 5  # Only span loss initially
+    WARMUP_REASONING_EPOCHS = 2 if DEBUG_MODE else 5
     
     # ============== Data ==============
-    MAX_CONTEXT_LEN = 512
+    MAX_CONTEXT_LEN = 256 if DEBUG_MODE else 512
     MAX_QUESTION_LEN = 64
-    DATASETS = ['squad', 'hotpotqa', 'drop']  # All datasets for ACT visualization
-    SAMPLES_PER_DATASET = 10000
-    NUM_VAL_SAMPLES = 100
+    DATASETS = ['squad'] if DEBUG_MODE else ['squad', 'hotpotqa', 'drop']
+    SAMPLES_PER_DATASET = 500 if DEBUG_MODE else 10000  # Tiny dataset for debug
+    NUM_VAL_SAMPLES = 50 if DEBUG_MODE else 100
     
     # ============== System ==============
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -60,8 +70,8 @@ class PureReasoningConfig:
         """Rough parameter count estimate"""
         encoder = cls.N_ENCODER_LAYERS * (4 * cls.D_MODEL ** 2 + 2 * cls.D_MODEL * cls.D_FF)
         reasoning = cls.N_REASONING_LAYERS * (4 * cls.D_MODEL ** 2 + 2 * cls.D_MODEL * cls.D_FF)
-        heads = cls.D_MODEL * 4  # Start/end/classification heads
-        total = encoder + reasoning + heads
+        decoder = cls.N_REASONING_LAYERS * (4 * cls.D_MODEL ** 2 + 2 * cls.D_MODEL * cls.D_FF)
+        total = encoder + reasoning + decoder
         return total / 1e6
     
     @classmethod

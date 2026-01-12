@@ -5,7 +5,7 @@ A reasoning-focused model without pretrained T5.
 Three components:
 1. Encoder (from scratch)
 2. Reasoning Core (TRM-style recursive)
-3. Task Heads (span, classification)
+3. Decoder (for text generation)
 
 Note: CUDA workaround is set in run_pure_reasoning.py, not here.
 """
@@ -87,6 +87,53 @@ class TransformerBlock(nn.Module):
         
         # Pre-norm FFN
         x = x + self.dropout(self.mlp(self.norm2(x)))
+        return x
+
+
+class DecoderBlock(nn.Module):
+    """Transformer decoder block with cross-attention"""
+    def __init__(self, dim, num_heads, ff_dim=None, dropout=0.1):
+        super().__init__()
+        ff_dim = ff_dim or dim * 4
+        
+        # Self-attention (causal)
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+            bias=False
+        )
+        
+        # Cross-attention to encoder
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+            bias=False
+        )
+        
+        self.mlp = SwiGLU(dim, ff_dim)
+        self.norm1 = RMSNorm(dim)
+        self.norm2 = RMSNorm(dim)
+        self.norm3 = RMSNorm(dim)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x, memory, tgt_mask=None, memory_key_padding_mask=None):
+        # Self-attention with causal mask
+        normed = self.norm1(x)
+        attn_out, _ = self.self_attn(normed, normed, normed, attn_mask=tgt_mask)
+        x = x + self.dropout(attn_out)
+        
+        # Cross-attention to encoder memory
+        normed = self.norm2(x)
+        cross_out, _ = self.cross_attn(normed, memory, memory, 
+                                        key_padding_mask=memory_key_padding_mask)
+        x = x + self.dropout(cross_out)
+        
+        # FFN
+        x = x + self.dropout(self.mlp(self.norm3(x)))
         return x
 
 
@@ -239,91 +286,114 @@ class ReasoningCore(nn.Module):
         return torch.sigmoid(self.q_head(pooled))  # [B, 1]
 
 
-# ============== Task Heads ==============
+# ============== Decoder ==============
 
-class SpanHead(nn.Module):
+class PureDecoder(nn.Module):
     """
-    Predicts start and end positions for extractive QA.
-    Used for SQuAD and HotpotQA.
+    Transformer decoder for text generation.
+    Uses cross-attention to attend to encoder memory.
     """
-    def __init__(self, dim):
+    def __init__(self, config, vocab_size=30522):
         super().__init__()
-        self.start_proj = nn.Linear(dim, 1)
-        self.end_proj = nn.Linear(dim, 1)
+        self.d_model = config.D_MODEL
+        
+        # Token + position embeddings (shared with output projection)
+        self.token_embed = nn.Embedding(vocab_size, config.D_MODEL)
+        self.pos_encoder = SinusoidalPE(config.D_MODEL, config.MAX_ANSWER_LEN + 10)
+        self.embed_dropout = nn.Dropout(config.DROPOUT)
+        
+        # Decoder layers
+        self.layers = nn.ModuleList([
+            DecoderBlock(config.D_MODEL, config.N_HEADS, config.D_FF, config.DROPOUT)
+            for _ in range(config.N_REASONING_LAYERS)  # Same depth as reasoning
+        ])
+        
+        self.final_norm = RMSNorm(config.D_MODEL)
+        
+        # Output projection (tied with embeddings)
+        self.output_proj = nn.Linear(config.D_MODEL, vocab_size, bias=False)
+        self.output_proj.weight = self.token_embed.weight  # Weight tying
+        
+        # Initialize
+        nn.init.normal_(self.token_embed.weight, std=0.02)
     
-    def forward(self, hidden_states, attention_mask=None):
+    def forward(self, decoder_input_ids, memory, memory_key_padding_mask=None):
         """
         Args:
-            hidden_states: [B, L, D] from reasoning core
-            attention_mask: [B, L] 1=valid, 0=padding
+            decoder_input_ids: [B, T] target tokens (shifted right)
+            memory: [B, L, D] encoder output
+            memory_key_padding_mask: [B, L] True=ignore
         Returns:
-            start_logits: [B, L]
-            end_logits: [B, L]
+            logits: [B, T, Vocab]
         """
-        start_logits = self.start_proj(hidden_states).squeeze(-1)  # [B, L]
-        end_logits = self.end_proj(hidden_states).squeeze(-1)      # [B, L]
+        B, T = decoder_input_ids.shape
+        device = decoder_input_ids.device
         
-        # Mask out padding positions
-        if attention_mask is not None:
-            mask = (attention_mask == 0)
-            start_logits = start_logits.masked_fill(mask, float('-inf'))
-            end_logits = end_logits.masked_fill(mask, float('-inf'))
+        # Embed tokens
+        x = self.token_embed(decoder_input_ids)
+        x = self.pos_encoder(x)
+        x = self.embed_dropout(x)
         
-        return start_logits, end_logits
-
-
-class ClassificationHead(nn.Module):
-    """
-    Classification head for yes/no answers (HotpotQA)
-    and answer type prediction.
-    """
-    def __init__(self, dim, num_classes=3):
-        super().__init__()
-        # num_classes: 0=span, 1=yes, 2=no
-        self.classifier = nn.Sequential(
-            nn.Linear(dim, dim // 2),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(dim // 2, num_classes)
+        # Causal mask (upper triangular)
+        causal_mask = torch.triu(
+            torch.ones(T, T, device=device, dtype=torch.bool), 
+            diagonal=1
         )
+        
+        # Apply decoder layers
+        for layer in self.layers:
+            x = layer(x, memory, tgt_mask=causal_mask, 
+                     memory_key_padding_mask=memory_key_padding_mask)
+        
+        x = self.final_norm(x)
+        logits = self.output_proj(x)
+        
+        return logits
     
-    def forward(self, hidden_states):
+    def generate(self, memory, memory_key_padding_mask, tokenizer, max_len=50):
         """
+        Autoregressive generation.
+        
         Args:
-            hidden_states: [B, L, D]
+            memory: [B, L, D] encoder output
+            memory_key_padding_mask: [B, L]
+            tokenizer: for BOS/EOS tokens
+            max_len: max tokens to generate
         Returns:
-            logits: [B, num_classes]
+            generated_ids: [B, T] generated token ids
         """
-        # Use [CLS] token (position 0) for classification
-        cls_hidden = hidden_states[:, 0, :]  # [B, D]
-        return self.classifier(cls_hidden)
-
-
-class NumericHead(nn.Module):
-    """
-    For DROP-style counting/arithmetic.
-    Predicts a number directly.
-    """
-    def __init__(self, dim, max_count=10):
-        super().__init__()
-        self.max_count = max_count
-        self.counter = nn.Linear(dim, max_count + 1)  # 0 to max_count
-    
-    def forward(self, hidden_states):
-        cls_hidden = hidden_states[:, 0, :]
-        return self.counter(cls_hidden)  # [B, max_count+1]
+        B = memory.size(0)
+        device = memory.device
+        
+        # Start with [CLS] (id=101 in BERT tokenizer) as BOS
+        bos_id = tokenizer.cls_token_id or 101
+        eos_id = tokenizer.sep_token_id or 102
+        
+        generated = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
+        
+        for _ in range(max_len):
+            logits = self.forward(generated, memory, memory_key_padding_mask)
+            next_token_logits = logits[:, -1, :]  # [B, Vocab]
+            next_token = next_token_logits.argmax(dim=-1, keepdim=True)  # [B, 1]
+            generated = torch.cat([generated, next_token], dim=1)
+            
+            # Stop if all sequences have EOS
+            if (next_token == eos_id).all():
+                break
+        
+        return generated
 
 
 # ============== Full Model ==============
 
 class PureReasoningModel(nn.Module):
     """
-    Complete pure reasoning model.
+    Complete pure reasoning model with generative output.
     
     Architecture:
     1. Encoder: input_ids -> contextualized memory
     2. Reasoning Core: iterative refinement with ACT
-    3. Task Heads: span + classification + numeric
+    3. Decoder: generates answer text from refined memory
     """
     def __init__(self, config):
         super().__init__()
@@ -332,31 +402,24 @@ class PureReasoningModel(nn.Module):
         # Components
         self.encoder = PureEncoder(config)
         self.reasoning = ReasoningCore(config)
-        
-        # Task heads
-        self.span_head = SpanHead(config.D_MODEL)
-        self.class_head = ClassificationHead(config.D_MODEL, num_classes=3)
-        self.numeric_head = NumericHead(config.D_MODEL, max_count=10)
+        self.decoder = PureDecoder(config)
     
     def forward(self, input_ids, attention_mask=None, 
-                start_positions=None, end_positions=None,
-                answer_type=None, numeric_answer=None,
+                decoder_input_ids=None, labels=None,
                 n_supervision=None, min_steps=None):
         """
         Forward pass with deep supervision.
         
         Args:
-            input_ids: [B, L]
+            input_ids: [B, L] encoder input
             attention_mask: [B, L]
-            start_positions: [B] for span loss
-            end_positions: [B] for span loss
-            answer_type: [B] 0=span, 1=yes, 2=no
-            numeric_answer: [B] for counting
+            decoder_input_ids: [B, T] target tokens shifted right (starts with BOS)
+            labels: [B, T] target tokens for loss (ends with EOS)
             n_supervision: override config.N_SUPERVISION
             min_steps: override config.MIN_SUPERVISION_STEPS
         
         Returns:
-            dict with losses and predictions
+            dict with loss and logits
         """
         n_supervision = n_supervision or self.config.N_SUPERVISION
         min_steps = min_steps or self.config.MIN_SUPERVISION_STEPS
@@ -369,18 +432,12 @@ class PureReasoningModel(nn.Module):
         # 2. Initialize reasoning state
         y, z = self.reasoning.init_state(B, L, device)
         
-        # 3. Deep supervision loop
-        total_span_loss = 0.0
-        total_class_loss = 0.0
+        # 3. Deep supervision loop (refine memory)
         total_act_loss = 0.0
         supervision_steps = 0
-        
-        all_start_logits = []
-        all_end_logits = []
         all_q_hats = []
         
         for step in range(n_supervision):
-            # Deep recursion step
             (y, z), y_out, q_hat = self.reasoning.deep_recursion(
                 memory, y, z, key_padding_mask=padding_mask
             )
@@ -388,63 +445,79 @@ class PureReasoningModel(nn.Module):
             supervision_steps = step + 1
             all_q_hats.append(q_hat.mean().item())
             
-            # Get predictions from this step
-            start_logits, end_logits = self.span_head(y_out, attention_mask)
-            all_start_logits.append(start_logits)
-            all_end_logits.append(end_logits)
+            # TODO: add ACT loss based on generation quality
             
-            # Compute losses if labels provided
-            if start_positions is not None and end_positions is not None:
-                span_loss = F.cross_entropy(start_logits, start_positions, ignore_index=-1)
-                span_loss += F.cross_entropy(end_logits, end_positions, ignore_index=-1)
-                total_span_loss += span_loss
-                
-                # ACT loss: is current prediction correct?
-                with torch.no_grad():
-                    pred_start = start_logits.argmax(dim=-1)
-                    pred_end = end_logits.argmax(dim=-1)
-                    correct = ((pred_start == start_positions) & (pred_end == end_positions)).float()
-                
-                act_loss = F.binary_cross_entropy(q_hat.squeeze(-1), correct)
-                total_act_loss += act_loss
-            
-            if answer_type is not None:
-                class_logits = self.class_head(y_out)
-                class_loss = F.cross_entropy(class_logits, answer_type)
-                total_class_loss += class_loss
-            
-            # Early stopping (after minimum steps)
+            # Early stopping
             if step >= min_steps - 1 and q_hat.mean().item() > 0.5:
                 break
         
-        # Use final predictions
-        final_start_logits = all_start_logits[-1]
-        final_end_logits = all_end_logits[-1]
-        final_class_logits = self.class_head(y_out)
-        final_numeric_logits = self.numeric_head(y_out)
+        # The reasoning output y_out now contains refined representations
+        # We use it as additional context for the decoder by concatenating
+        # OR just use encoder memory directly (simpler for now)
+        refined_memory = memory + y_out  # Residual connection
+        
+        # 4. Decode (if training)
+        if decoder_input_ids is not None:
+            logits = self.decoder(decoder_input_ids, refined_memory, padding_mask)
+            
+            # Compute loss if labels provided
+            if labels is not None:
+                loss = F.cross_entropy(
+                    logits.view(-1, logits.size(-1)),
+                    labels.view(-1),
+                    ignore_index=-100  # Ignore padding
+                )
+            else:
+                loss = 0.0
+        else:
+            logits = None
+            loss = 0.0
         
         return {
-            'start_logits': final_start_logits,
-            'end_logits': final_end_logits,
-            'class_logits': final_class_logits,
-            'numeric_logits': final_numeric_logits,
-            'span_loss': total_span_loss / supervision_steps if supervision_steps > 0 else 0,
-            'class_loss': total_class_loss / supervision_steps if supervision_steps > 0 else 0,
+            'logits': logits,
+            'loss': loss,
             'act_loss': total_act_loss / supervision_steps if supervision_steps > 0 else 0,
             'supervision_steps': supervision_steps,
             'q_hats': all_q_hats,
+            'refined_memory': refined_memory,
+            'memory_key_padding_mask': padding_mask,
         }
+    
+    def generate(self, input_ids, attention_mask, tokenizer, max_len=50):
+        """
+        Generate answer text.
+        
+        Args:
+            input_ids: [B, L] encoder input
+            attention_mask: [B, L]
+            tokenizer: for special tokens
+            max_len: max answer tokens
+        Returns:
+            generated_ids: [B, T]
+        """
+        # Forward pass to get refined memory
+        outputs = self.forward(input_ids, attention_mask)
+        
+        # Generate from decoder
+        generated = self.decoder.generate(
+            outputs['refined_memory'],
+            outputs['memory_key_padding_mask'],
+            tokenizer,
+            max_len
+        )
+        
+        return generated
     
     def get_metrics(self):
         """Return model size info"""
         total = sum(p.numel() for p in self.parameters())
         encoder = sum(p.numel() for p in self.encoder.parameters())
         reasoning = sum(p.numel() for p in self.reasoning.parameters())
-        heads = total - encoder - reasoning
+        decoder = sum(p.numel() for p in self.decoder.parameters())
         
         return {
             'total_params_M': total / 1e6,
             'encoder_params_M': encoder / 1e6,
             'reasoning_params_M': reasoning / 1e6,
-            'heads_params_M': heads / 1e6,
+            'decoder_params_M': decoder / 1e6,
         }

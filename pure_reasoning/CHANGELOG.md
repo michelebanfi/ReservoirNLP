@@ -88,11 +88,68 @@ All existing datasets can be used with task-specific heads:
 | No pretrained knowledge | Larger training dataset, longer training |
 | Limited to extractive answers | Span head covers most QA; can add generation later |
 
+## 2026-01-12: Pivot to Generative Architecture
+
+### Motivation
+
+The span-extraction approach was not yielding good results:
+
+1. **SQuAD at 0% EM**: Despite decreasing losses, the model couldn't produce correct spans
+2. **Dataset Issues**: Span alignment bugs caused incorrect supervision
+3. **Debugging Difficulty**: Span positions don't reveal *what* the model is thinking
+
+### Decision
+
+Pivot to **text generation** instead of span extraction. This gives us:
+
+- **Inspectable outputs**: We can see exactly what the model generates
+- **Flexibility**: Not limited to extractive answers
+- **Familiar territory**: We have more experience debugging generative models
+
+### New Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  ENCODER (from scratch, ~50M params)                    │
+│  - Input: [CLS] context [SEP] question [SEP]            │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│  REASONING CORE (TRM-style, ~50M params)                │
+│  - Recursive refinement with ACT                        │
+│  - Refines encoder memory through y,z states            │
+└─────────────────────────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────┐
+│  DECODER (from scratch, ~50M params)                    │
+│  - Cross-attention to refined memory                    │
+│  - Autoregressive text generation                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `config.py` | Added `MAX_ANSWER_LEN`, `VOCAB_SIZE`, removed span settings |
+| `model.py` | Removed task heads, added `PureDecoder` with cross-attention |
+| `dataset.py` | Changed to `GenerativeQADataset`, returns decoder targets |
+| `train.py` | Cross-entropy loss, text EM/F1, sample generation logging |
+
+### Metrics Logging
+
+The `pure_reasoning_metrics.json` now includes `sample_generations` with:
+- Source dataset
+- Question text
+- Gold answer
+- Predicted answer
+
+This allows direct inspection of model behavior.
+
 ---
 
 ## Next Steps
 
-1. Implement basic encoder + reasoning core
-2. Add span prediction head
-3. Test on SQuAD (pure extractive)
-4. Extend to HotpotQA/DROP with additional heads
+1. Run training with generative architecture
+2. Inspect sample generations in metrics
+3. Iterate based on observed failure modes
