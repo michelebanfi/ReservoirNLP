@@ -153,3 +153,102 @@ This allows direct inspection of model behavior.
 1. Run training with generative architecture
 2. Inspect sample generations in metrics
 3. Iterate based on observed failure modes
+
+---
+
+## 2026-01-18: Training Fixes for Overfitting and ACT
+
+### Problem Analysis
+
+After 50 epochs (5 days training), the model showed:
+- Train loss dropped 7.11 → 0.49 (93% reduction)
+- Val EM stayed ~4%, F1 ~6%
+- ACT steps frozen at 4.0 with act_loss = 0.0
+- Generated text was gibberish unrelated to questions
+
+### Root Causes
+
+1. **ACT not learning**: The ACT loss was never computed (TODO placeholder in code)
+2. **Overfitting**: Model memorizing training data with 0.1 dropout, no label smoothing
+3. **Insufficient capacity**: Only 6 encoder layers for from-scratch learning
+
+### Fixes Applied
+
+| Fix | Before | After |
+|-----|--------|-------|
+| ACT loss | TODO (not computed) | Ponder cost: Σ(1-q_hat) per step |
+| Label smoothing | None | 0.1 |
+| Dropout | 0.1 | 0.3 |
+| Encoder layers | 6 | 8 |
+
+### Config Changes
+
+```python
+N_ENCODER_LAYERS = 8      # Was: 6
+DROPOUT = 0.3             # Was: 0.1
+LABEL_SMOOTHING = 0.1     # NEW
+ACT_LOSS_LAMBDA = 0.01    # NEW
+```
+
+### Code Changes
+
+**model.py**: Replaced TODO with actual ACT ponder cost:
+```python
+ponder_cost = (1 - q_hat).mean()
+total_act_loss = total_act_loss + ponder_cost
+```
+
+Added label smoothing to cross-entropy:
+```python
+loss = F.cross_entropy(..., label_smoothing=self.config.LABEL_SMOOTHING)
+```
+
+**train.py**: Added ACT loss to total loss:
+```python
+if isinstance(act_loss, torch.Tensor):
+    total_loss_val = loss + config.ACT_LOSS_LAMBDA * act_loss
+```
+
+### Expected Improvements
+
+1. ACT should now show varying `avg_steps` as Q-head learns
+2. Label smoothing should reduce overfitting
+3. Higher dropout should prevent memorization
+4. More encoder layers should improve representation quality
+
+---
+
+## 2026-01-18: PonderNet-style Halting Network
+
+### Motivation
+
+Based on the paper "PonderNet: Learning to Ponder" (Banino et al., 2021), we replaced the simple linear Q-head with a proper adaptive computation mechanism.
+
+### Changes
+
+**New Classes in model.py:**
+- `HaltingNetwork`: MLP that predicts λ_n (halting probability) per step
+- `ReconstructionLoss`: L_rec = Σ p_n * L(y, ŷ_n) - weighted loss across steps
+- `RegularizationLoss`: KL divergence with geometric prior for exploration
+
+**Key Algorithm:**
+```
+p_n = λ_n × Π(1-λ_j) for j < n  # Unconditioned halt probability
+L = L_rec + β * L_reg           # Total loss
+```
+
+**Config Updates:**
+```python
+HALTING_HIDDEN_DIM = D_MODEL  # Halting network MLP hidden dim
+LAMBDA_P = 0.2                # Geometric prior (~5 expected steps)
+REG_LOSS_WEIGHT = 0.01        # KL regularization weight
+HALTING_LR_MULTIPLIER = 0.1   # Separate LR for halting network
+```
+
+### Expected Benefits
+
+1. **Proper probability distribution**: halt probs sum to ~1
+2. **Exploration via KL regularization**: prevents collapse to always-halt
+3. **Per-step loss weighting**: harder samples can use more steps
+4. **Expected steps metric**: smooth measure of computation used
+

@@ -135,13 +135,14 @@ def run_validation(model, val_loader, tokenizer, config, num_samples_to_log=5):
 
 
 def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
-    """Train for one epoch"""
+    """Train for one epoch with PonderNet losses"""
     model.train()
     device = config.DEVICE
     
     total_loss = 0
-    total_act_loss = 0
-    total_steps = 0
+    total_rec_loss = 0
+    total_reg_loss = 0
+    total_expected_steps = 0
     batches = 0
     
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
@@ -161,6 +162,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
             labels=labels,
         )
         
+        # PonderNet loss already includes reconstruction + regularization
         loss = outputs['loss']
         
         loss.backward()
@@ -171,31 +173,33 @@ def train_epoch(model, train_loader, optimizer, scheduler, config, epoch):
             scheduler.step()
         
         total_loss += loss.item()
-        total_act_loss += outputs['act_loss'] if isinstance(outputs['act_loss'], (int, float)) else outputs['act_loss'].item()
-        total_steps += outputs['supervision_steps']
+        total_rec_loss += outputs.get('rec_loss', 0)
+        total_reg_loss += outputs.get('reg_loss', 0)
+        total_expected_steps += outputs.get('expected_steps', outputs['supervision_steps'])
         batches += 1
         
         pbar.set_postfix({
             'loss': f"{loss.item():.3f}",
-            'steps': outputs['supervision_steps'],
+            'steps': f"{outputs.get('expected_steps', 0):.2f}",
         })
     
     return {
         'loss': total_loss / batches,
-        'act_loss': total_act_loss / batches,
-        'avg_steps': total_steps / batches,
+        'rec_loss': total_rec_loss / batches,
+        'reg_loss': total_reg_loss / batches,
+        'avg_steps': total_expected_steps / batches,
     }
 
 
 def get_optimizer(model, config):
-    """Create optimizer with separate Q-head learning rate"""
-    q_head_params = list(model.reasoning.q_head.parameters())
-    q_head_ids = set(id(p) for p in q_head_params)
-    other_params = [p for p in model.parameters() if id(p) not in q_head_ids]
+    """Create optimizer with separate halting network learning rate"""
+    halting_params = list(model.reasoning.halting_net.parameters())
+    halting_ids = set(id(p) for p in halting_params)
+    other_params = [p for p in model.parameters() if id(p) not in halting_ids]
     
     optimizer = torch.optim.AdamW([
         {'params': other_params, 'lr': config.LEARNING_RATE},
-        {'params': q_head_params, 'lr': config.LEARNING_RATE * config.Q_HEAD_LR_MULTIPLIER},
+        {'params': halting_params, 'lr': config.LEARNING_RATE * config.HALTING_LR_MULTIPLIER},
     ], weight_decay=config.WEIGHT_DECAY)
     
     return optimizer
@@ -256,13 +260,13 @@ def train_main(args=None):
     total_steps = len(train_loader) * config.EPOCHS
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
-        max_lr=[config.LEARNING_RATE, config.LEARNING_RATE * config.Q_HEAD_LR_MULTIPLIER],
+        max_lr=[config.LEARNING_RATE, config.LEARNING_RATE * config.HALTING_LR_MULTIPLIER],
         total_steps=total_steps,
         pct_start=0.1,
     )
     
     print(f"\nStarting training for {config.EPOCHS} epochs...")
-    print(f"Q-head LR: {config.LEARNING_RATE * config.Q_HEAD_LR_MULTIPLIER:.2e}\n")
+    print(f"Halting Network LR: {config.LEARNING_RATE * config.HALTING_LR_MULTIPLIER:.2e}\n")
     
     metrics_history = []
     metrics_file = os.path.join(config.RESULTS_DIR, "pure_reasoning_metrics.json")

@@ -90,6 +90,90 @@ class TransformerBlock(nn.Module):
         return x
 
 
+# ============== PonderNet Components ==============
+
+class HaltingNetwork(nn.Module):
+    """
+    PonderNet-style halting network (MLP).
+    Outputs λ_n (halting probability) at each pondering step.
+    """
+    def __init__(self, dim, hidden_dim=None):
+        super().__init__()
+        hidden_dim = hidden_dim or dim
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim, 1),
+        )
+        # Initialize to encourage continuing early on
+        nn.init.zeros_(self.net[-1].bias)
+        nn.init.normal_(self.net[-1].weight, std=0.01)
+    
+    def forward(self, state):
+        """
+        Args:
+            state: [B, L, D] reasoning state
+        Returns:
+            lambda_n: [B, 1] halting probability
+        """
+        pooled = state.mean(dim=1)  # [B, D]
+        return torch.sigmoid(self.net(pooled))  # [B, 1]
+
+
+class ReconstructionLoss(nn.Module):
+    """
+    PonderNet reconstruction loss: L_rec = Σ p_n * L(y, y_hat_n)
+    Weights each step's loss by its halting probability.
+    """
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, halt_probs, step_losses):
+        """
+        Args:
+            halt_probs: [N] probability of halting at each step (sums to ~1)
+            step_losses: [N] loss at each step
+        Returns:
+            weighted_loss: scalar
+        """
+        # Weight losses by halting probabilities
+        return (halt_probs * step_losses).sum()
+
+
+class RegularizationLoss(nn.Module):
+    """
+    PonderNet regularization loss: KL divergence from geometric prior.
+    Encourages exploration and prevents collapse.
+    """
+    def __init__(self, lambda_p: float, max_steps: int = 20):
+        super().__init__()
+        # Pre-compute geometric distribution p_G(k) = (1-λp)^k * λp
+        p_g = torch.zeros(max_steps)
+        not_halted = 1.0
+        for k in range(max_steps):
+            p_g[k] = not_halted * lambda_p
+            not_halted = not_halted * (1 - lambda_p)
+        self.register_buffer('p_g', p_g)
+        self.kl_div = nn.KLDivLoss(reduction='batchmean')
+    
+    def forward(self, p):
+        """
+        Args:
+            p: [N, B] halting probabilities per step and batch
+        Returns:
+            kl_loss: scalar
+        """
+        # p: [N, B] -> [B, N]
+        p = p.transpose(0, 1)
+        # Get geometric prior up to N steps, expand across batch
+        p_g = self.p_g[:p.shape[1]].unsqueeze(0).expand_as(p)
+        # KL divergence (input is log probabilities)
+        # Clamp to avoid log(0)
+        p_clamped = p.clamp(min=1e-8)
+        return self.kl_div(p_clamped.log(), p_g)
+
+
 class DecoderBlock(nn.Module):
     """Transformer decoder block with cross-attention"""
     def __init__(self, dim, num_heads, ff_dim=None, dropout=0.1):
@@ -222,11 +306,8 @@ class ReasoningCore(nn.Module):
         self.z_input_proj = nn.Linear(dim * 3, dim, bias=False)  # (x, y, z) -> z
         self.y_input_proj = nn.Linear(dim * 2, dim, bias=False)  # (y, z) -> y
         
-        # Q-head for ACT (predicts halting)
-        self.q_head = nn.Linear(dim, 1, bias=True)
-        with torch.no_grad():
-            nn.init.normal_(self.q_head.weight, std=0.02)
-            self.q_head.bias.data = torch.tensor([config.Q_HEAD_BIAS_INIT])
+        # PonderNet halting network (replaces simple Q-head)
+        self.halting_net = HaltingNetwork(dim, config.HALTING_HIDDEN_DIM)
         
         # Learnable initial states
         self.y_init = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
@@ -281,9 +362,8 @@ class ReasoningCore(nn.Module):
         return (y.detach(), z.detach()), y, q_hat
     
     def get_q_values(self, y):
-        """Predict halt probability from answer state"""
-        pooled = y.mean(dim=1)  # [B, D]
-        return torch.sigmoid(self.q_head(pooled))  # [B, 1]
+        """Predict halting probability λ_n from answer state using PonderNet network"""
+        return self.halting_net(y)  # [B, 1]
 
 
 # ============== Decoder ==============
@@ -403,12 +483,19 @@ class PureReasoningModel(nn.Module):
         self.encoder = PureEncoder(config)
         self.reasoning = ReasoningCore(config)
         self.decoder = PureDecoder(config)
+        
+        # PonderNet loss modules
+        self.reconstruction_loss = ReconstructionLoss()
+        self.regularization_loss = RegularizationLoss(
+            lambda_p=config.LAMBDA_P,
+            max_steps=config.N_SUPERVISION
+        )
     
     def forward(self, input_ids, attention_mask=None, 
                 decoder_input_ids=None, labels=None,
                 n_supervision=None, min_steps=None):
         """
-        Forward pass with deep supervision.
+        Forward pass with PonderNet-style deep supervision.
         
         Args:
             input_ids: [B, L] encoder input
@@ -432,54 +519,92 @@ class PureReasoningModel(nn.Module):
         # 2. Initialize reasoning state
         y, z = self.reasoning.init_state(B, L, device)
         
-        # 3. Deep supervision loop (refine memory)
-        total_act_loss = 0.0
-        supervision_steps = 0
-        all_q_hats = []
+        # 3. PonderNet supervision loop
+        # Collect: λ_n (halting prob), p_n (unconditioned halt), losses per step
+        lambda_n_list = []      # [N] each is [B, 1]
+        p_n_list = []           # [N] each is [B, 1]  
+        step_losses = []        # [N] each is scalar
+        all_y_outs = []         # For final prediction
+        
+        un_halted_prob = torch.ones(B, 1, device=device)  # Π(1-λ_j)
         
         for step in range(n_supervision):
-            (y, z), y_out, q_hat = self.reasoning.deep_recursion(
+            (y, z), y_out, lambda_n = self.reasoning.deep_recursion(
                 memory, y, z, key_padding_mask=padding_mask
             )
             
-            supervision_steps = step + 1
-            all_q_hats.append(q_hat.mean().item())
+            # Store lambda_n
+            lambda_n_list.append(lambda_n.mean().item())
             
-            # TODO: add ACT loss based on generation quality
+            # Compute p_n = λ_n × Π(1-λ_j) for j < n
+            p_n = un_halted_prob * lambda_n  # [B, 1]
+            p_n_list.append(p_n)
             
-            # Early stopping
-            if step >= min_steps - 1 and q_hat.mean().item() > 0.5:
-                break
-        
-        # The reasoning output y_out now contains refined representations
-        # We use it as additional context for the decoder by concatenating
-        # OR just use encoder memory directly (simpler for now)
-        refined_memory = memory + y_out  # Residual connection
-        
-        # 4. Decode (if training)
-        if decoder_input_ids is not None:
-            logits = self.decoder(decoder_input_ids, refined_memory, padding_mask)
+            # Update un_halted probability for next step
+            un_halted_prob = un_halted_prob * (1 - lambda_n)
             
-            # Compute loss if labels provided
-            if labels is not None:
-                loss = F.cross_entropy(
+            # Compute loss at this step
+            refined_memory = memory + y_out  # Residual
+            all_y_outs.append(y_out)
+            
+            if decoder_input_ids is not None and labels is not None:
+                logits = self.decoder(decoder_input_ids, refined_memory, padding_mask)
+                step_loss = F.cross_entropy(
                     logits.view(-1, logits.size(-1)),
                     labels.view(-1),
-                    ignore_index=-100  # Ignore padding
+                    ignore_index=-100,
+                    label_smoothing=self.config.LABEL_SMOOTHING
                 )
-            else:
-                loss = 0.0
+                step_losses.append(step_loss)
+        
+        # 4. Compute PonderNet losses
+        if step_losses:
+            # Stack p_n: [N, B, 1] -> mean over batch -> [N]
+            p_n_stacked = torch.stack([p.mean() for p in p_n_list])  # [N]
+            step_losses_stacked = torch.stack(step_losses)  # [N]
+            
+            # Normalize p_n to sum to 1 (handle numerical issues)
+            p_n_normalized = p_n_stacked / (p_n_stacked.sum() + 1e-8)
+            
+            # Reconstruction loss: Σ p_n * L_n
+            rec_loss = self.reconstruction_loss(p_n_normalized, step_losses_stacked)
+            
+            # Regularization loss: KL(p || p_geometric)
+            # Stack p_n: [N, B] for KL computation
+            p_for_kl = torch.stack([p.squeeze(-1) for p in p_n_list], dim=0)  # [N, B]
+            reg_loss = self.regularization_loss(p_for_kl)
+            
+            # Total loss
+            total_loss = rec_loss + self.config.REG_LOSS_WEIGHT * reg_loss
+            
+            # Use final step's logits for output
+            final_refined_memory = memory + all_y_outs[-1]
+            final_logits = self.decoder(decoder_input_ids, final_refined_memory, padding_mask)
         else:
-            logits = None
-            loss = 0.0
+            total_loss = torch.tensor(0.0, device=device)
+            rec_loss = torch.tensor(0.0, device=device)
+            reg_loss = torch.tensor(0.0, device=device)
+            final_logits = None
+            final_refined_memory = memory + all_y_outs[-1] if all_y_outs else memory
+        
+        # Compute expected number of steps: Σ n * p_n
+        if p_n_list:
+            step_indices = torch.arange(1, len(p_n_list) + 1, device=device, dtype=torch.float)
+            p_n_stacked = torch.stack([p.mean() for p in p_n_list])
+            expected_steps = (step_indices * p_n_stacked).sum().item()
+        else:
+            expected_steps = 0
         
         return {
-            'logits': logits,
-            'loss': loss,
-            'act_loss': total_act_loss / supervision_steps if supervision_steps > 0 else 0,
-            'supervision_steps': supervision_steps,
-            'q_hats': all_q_hats,
-            'refined_memory': refined_memory,
+            'logits': final_logits,
+            'loss': total_loss,
+            'rec_loss': rec_loss.item() if torch.is_tensor(rec_loss) else rec_loss,
+            'reg_loss': reg_loss.item() if torch.is_tensor(reg_loss) else reg_loss,
+            'supervision_steps': len(step_losses),
+            'expected_steps': expected_steps,
+            'q_hats': lambda_n_list,  # Keep for backwards compatibility
+            'halt_probs': [p.mean().item() for p in p_n_list],
+            'refined_memory': final_refined_memory,
             'memory_key_padding_mask': padding_mask,
         }
     
