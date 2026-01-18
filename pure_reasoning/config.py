@@ -34,7 +34,7 @@ class PureReasoningConfig:
     
     # ============== PonderNet Halting ==============
     HALTING_HIDDEN_DIM = D_MODEL  # Hidden dim for halting network MLP
-    LAMBDA_P = 0.2                # Geometric prior parameter (~5 expected steps)
+    LAMBDA_P = 0.35               # Geometric prior (~3 expected steps, was 0.2)
     REG_LOSS_WEIGHT = 0.01        # Weight for KL regularization loss
     HALTING_LR_MULTIPLIER = 0.1   # Separate LR for halting network
     

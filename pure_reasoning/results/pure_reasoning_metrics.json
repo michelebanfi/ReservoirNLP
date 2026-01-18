@@ -2,10 +2,10 @@
   {
     "epoch": 1,
     "train": {
-      "loss": 9.085979963603773,
-      "rec_loss": 9.088015242626792,
-      "reg_loss": -0.2035294492778025,
-      "avg_steps": 1.6329415722897178
+      "loss": 8.111262037398967,
+      "rec_loss": 8.109138957997585,
+      "reg_loss": 0.21230758439521602,
+      "avg_steps": 1.3579736095159611
     },
     "val": {
       "exact_match": 0.0,
@@ -25,24 +25,6 @@
         }
       },
       "sample_generations": [
-        {
-          "source": "squad",
-          "question": "What venue did Super Bowl 50 take place in?",
-          "gold": "Levi's Stadium",
-          "predicted": ""
-        },
-        {
-          "source": "squad",
-          "question": "What does AFC stand for?",
-          "gold": "American Football Conference",
-          "predicted": ""
-        },
-        {
-          "source": "squad",
-          "question": "What was the theme of Super Bowl 50?",
-          "gold": "\"golden anniversary\"",
-          "predicted": ""
-        },
         {
           "source": "squad",
           "question": "Who won Super Bowl 50?",
@@ -51,8 +33,26 @@
         },
         {
           "source": "squad",
+          "question": "What day was the Super Bowl played on?",
+          "gold": "February 7, 2016",
+          "predicted": ""
+        },
+        {
+          "source": "squad",
           "question": "Where did Super Bowl 50 take place?",
           "gold": "Santa Clara, California",
+          "predicted": ""
+        },
+        {
+          "source": "squad",
+          "question": "What city did Super Bowl 50 take place in?",
+          "gold": "Santa Clara",
+          "predicted": ""
+        },
+        {
+          "source": "squad",
+          "question": "What is the AFC short for?",
+          "gold": "American Football Conference",
           "predicted": ""
         }
       ]
@@ -61,14 +61,14 @@
   {
     "epoch": 2,
     "train": {
-      "loss": 7.537203575435438,
-      "rec_loss": 7.53924184096487,
-      "reg_loss": -0.20382590395839592,
-      "avg_steps": 1.6338165684750205
+      "loss": 6.382829917238114,
+      "rec_loss": 6.384380051430235,
+      "reg_loss": -0.1550144063051235,
+      "avg_steps": 0.820668230189922
     },
     "val": {
-      "exact_match": 0.0,
-      "f1": 0.0,
+      "exact_match": 0.020202020202020204,
+      "f1": 0.024242424242424242,
       "per_dataset": {
         "squad": {
           "em": 0.0,
@@ -76,11 +76,11 @@
         },
         "hotpotqa": {
           "em": 0.0,
-          "f1": 0.0
+          "f1": 0.012121212121212121
         },
         "drop": {
-          "em": 0.0,
-          "f1": 0.0
+          "em": 0.06060606060606061,
+          "f1": 0.06060606060606061
         }
       },
       "sample_generations": [
@@ -88,31 +88,208 @@
           "source": "squad",
           "question": "Which NFL team won Super Bowl 50?",
           "gold": "Denver Broncos",
-          "predicted": ""
+          "predicted": "1"
         },
         {
           "source": "squad",
-          "question": "What day was the game played on?",
-          "gold": "February 7, 2016",
-          "predicted": ""
+          "question": "If Roman numerals were used, what would Super Bowl 50 have been called?",
+          "gold": "Super Bowl L",
+          "predicted": "1"
+        },
+        {
+          "source": "squad",
+          "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+          "gold": "gold",
+          "predicted": "1"
         },
         {
           "source": "squad",
           "question": "What venue did Super Bowl 50 take place in?",
           "gold": "Levi's Stadium",
-          "predicted": ""
+          "predicted": "1"
+        },
+        {
+          "source": "squad",
+          "question": "What is the AFC short for?",
+          "gold": "American Football Conference",
+          "predicted": "1"
+        }
+      ]
+    }
+  },
+  {
+    "epoch": 3,
+    "train": {
+      "loss": 6.118024638358583,
+      "rec_loss": 6.120029510335719,
+      "reg_loss": -0.20048683081218538,
+      "avg_steps": 0.642972340450642
+    },
+    "val": {
+      "exact_match": 0.09090909090909091,
+      "f1": 0.09494949494949495,
+      "per_dataset": {
+        "squad": {
+          "em": 0.0,
+          "f1": 0.0
+        },
+        "hotpotqa": {
+          "em": 0.0,
+          "f1": 0.012121212121212121
+        },
+        "drop": {
+          "em": 0.2727272727272727,
+          "f1": 0.2727272727272727
+        }
+      },
+      "sample_generations": [
+        {
+          "source": "squad",
+          "question": "What day was the game played on?",
+          "gold": "February 7, 2016",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "Which NFL team represented the AFC at Super Bowl 50?",
+          "gold": "Denver Broncos",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "If Roman numerals were used, what would Super Bowl 50 have been called?",
+          "gold": "Super Bowl L",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+          "gold": "gold",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "What day was the Super Bowl played on?",
+          "gold": "February 7, 2016",
+          "predicted": "the"
+        }
+      ]
+    }
+  },
+  {
+    "epoch": 4,
+    "train": {
+      "loss": 5.980426194819998,
+      "rec_loss": 5.982495102476566,
+      "reg_loss": -0.20689055704055948,
+      "avg_steps": 0.6217107465292545
+    },
+    "val": {
+      "exact_match": 0.09090909090909091,
+      "f1": 0.09494949494949495,
+      "per_dataset": {
+        "squad": {
+          "em": 0.0,
+          "f1": 0.0
+        },
+        "hotpotqa": {
+          "em": 0.0,
+          "f1": 0.012121212121212121
+        },
+        "drop": {
+          "em": 0.2727272727272727,
+          "f1": 0.2727272727272727
+        }
+      },
+      "sample_generations": [
+        {
+          "source": "squad",
+          "question": "Which NFL team represented the NFC at Super Bowl 50?",
+          "gold": "Carolina Panthers",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "What venue did Super Bowl 50 take place in?",
+          "gold": "Levi's Stadium",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "If Roman numerals were used, what would Super Bowl 50 have been called?",
+          "gold": "Super Bowl L",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "Who won Super Bowl 50?",
+          "gold": "Denver Broncos",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "What is the AFC short for?",
+          "gold": "American Football Conference",
+          "predicted": "the"
+        }
+      ]
+    }
+  },
+  {
+    "epoch": 5,
+    "train": {
+      "loss": 5.9126451903201165,
+      "rec_loss": 5.914736382504727,
+      "reg_loss": -0.20911972922213534,
+      "avg_steps": 0.5895691869106698
+    },
+    "val": {
+      "exact_match": 0.09090909090909091,
+      "f1": 0.09494949494949495,
+      "per_dataset": {
+        "squad": {
+          "em": 0.0,
+          "f1": 0.0
+        },
+        "hotpotqa": {
+          "em": 0.0,
+          "f1": 0.012121212121212121
+        },
+        "drop": {
+          "em": 0.2727272727272727,
+          "f1": 0.2727272727272727
+        }
+      },
+      "sample_generations": [
+        {
+          "source": "squad",
+          "question": "Which NFL team won Super Bowl 50?",
+          "gold": "Denver Broncos",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "If Roman numerals were used, what would Super Bowl 50 have been called?",
+          "gold": "Super Bowl L",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "What day was the Super Bowl played on?",
+          "gold": "February 7, 2016",
+          "predicted": "the"
+        },
+        {
+          "source": "squad",
+          "question": "What color was used to emphasize the 50th anniversary of the Super Bowl?",
+          "gold": "gold",
+          "predicted": "the"
         },
         {
           "source": "squad",
           "question": "What was the theme of Super Bowl 50?",
           "gold": "\"golden anniversary\"",
-          "predicted": ""
-        },
-        {
-          "source": "squad",
-          "question": "What does AFC stand for?",
-          "gold": "American Football Conference",
-          "predicted": ""
+          "predicted": "the"
         }
       ]
     }
