@@ -145,6 +145,8 @@ class RegularizationLoss(nn.Module):
     """
     PonderNet regularization loss: KL divergence from geometric prior.
     Encourages exploration and prevents collapse.
+    
+    Computes KL(p || p_g) = Σ p × log(p / p_g)
     """
     def __init__(self, lambda_p: float, max_steps: int = 20):
         super().__init__()
@@ -155,23 +157,26 @@ class RegularizationLoss(nn.Module):
             p_g[k] = not_halted * lambda_p
             not_halted = not_halted * (1 - lambda_p)
         self.register_buffer('p_g', p_g)
-        self.kl_div = nn.KLDivLoss(reduction='batchmean')
     
     def forward(self, p):
         """
         Args:
             p: [N, B] halting probabilities per step and batch
         Returns:
-            kl_loss: scalar
+            kl_loss: scalar (always >= 0)
         """
         # p: [N, B] -> [B, N]
         p = p.transpose(0, 1)
         # Get geometric prior up to N steps, expand across batch
         p_g = self.p_g[:p.shape[1]].unsqueeze(0).expand_as(p)
-        # KL divergence (input is log probabilities)
+        
         # Clamp to avoid log(0)
         p_clamped = p.clamp(min=1e-8)
-        return self.kl_div(p_clamped.log(), p_g)
+        p_g_clamped = p_g.clamp(min=1e-8)
+        
+        # KL(p || p_g) = Σ p × log(p / p_g)
+        kl = (p_clamped * (p_clamped.log() - p_g_clamped.log())).sum(dim=1).mean()
+        return kl
 
 
 class DecoderBlock(nn.Module):
