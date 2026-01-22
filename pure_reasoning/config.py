@@ -20,8 +20,8 @@ class PureReasoningConfig:
         N_REASONING_LAYERS = 2
         D_FF = 512
     else:
-        D_MODEL = 210             # Full size
-        N_HEADS = 6
+        D_MODEL = 256             # Full size
+        N_HEADS = 8
         N_ENCODER_LAYERS = 8      # Increased from 6 for deeper understanding
         N_REASONING_LAYERS = 2
         D_FF = 1024
@@ -34,8 +34,8 @@ class PureReasoningConfig:
     
     # ============== PonderNet Halting ==============
     HALTING_HIDDEN_DIM = D_MODEL  # Hidden dim for halting network MLP
-    LAMBDA_P = 0.35               # Geometric prior (~3 expected steps, was 0.2)
-    REG_LOSS_WEIGHT = 0.01        # Weight for KL regularization loss
+    LAMBDA_P = 0.25               # Geometric prior (~4 expected steps)
+    REG_LOSS_WEIGHT = 0.1         # Increased 10x to prevent early-halting collapse
     HALTING_LR_MULTIPLIER = 0.1   # Separate LR for halting network
     
     # ============== Generation Settings ==============
@@ -47,7 +47,7 @@ class PureReasoningConfig:
     LEARNING_RATE = 1e-3 if DEBUG_MODE else 3e-4  # Higher LR for debug
     WEIGHT_DECAY = 0.01
     WARMUP_STEPS = 100 if DEBUG_MODE else 1000
-    EPOCHS = 10 if DEBUG_MODE else 50
+    EPOCHS = 10 if DEBUG_MODE else 40
     GRADIENT_CLIP = 1.0
     DROPOUT = 0.3                # Increased for better regularization
     LABEL_SMOOTHING = 0.1         # Prevent overconfident predictions

@@ -252,3 +252,36 @@ HALTING_LR_MULTIPLIER = 0.1   # Separate LR for halting network
 3. **Per-step loss weighting**: harder samples can use more steps
 4. **Expected steps metric**: smooth measure of computation used
 
+---
+
+## 2026-01-22: Early-Halting Collapse Fix
+
+### Problem Observed
+
+After 28 epochs of training, the model showed:
+- Train loss decreasing well: 7.44 → 3.29 ✅
+- Expected steps collapsed: ~0.6 (should be ~3-4) ❌
+- Val EM stuck at ~3% despite lower loss ❌
+- Generated text: random historical phrases ("battle of poland", "dutch war")
+
+### Root Cause
+
+The `REG_LOSS_WEIGHT = 0.01` was too weak to prevent the model from taking a shortcut by halting immediately. The model learned to minimize reconstruction loss without doing proper reasoning.
+
+### Fix Applied
+
+| Parameter | Before | After |
+|-----------|--------|-------|
+| `LAMBDA_P` | 0.35 | 0.25 |
+| `REG_LOSS_WEIGHT` | 0.01 | **0.1** (10x increase) |
+
+**Rationale:**
+- Lower `LAMBDA_P` (0.25) → geometric prior expects ~4 steps
+- Higher `REG_LOSS_WEIGHT` (0.1) → stronger penalty for deviating from prior
+
+### Expected Outcome
+
+The model should now:
+1. Use 3-4 reasoning steps on average
+2. Actually compute refinements before generating
+3. Show improving validation accuracy as training progresses
