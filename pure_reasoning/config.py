@@ -29,13 +29,13 @@ class PureReasoningConfig:
     # ============== Reasoning Core (TRM-style) ==============
     N_RECURSIONS = 2 if DEBUG_MODE else 4
     T_DEEP_RECURSIONS = 2 if DEBUG_MODE else 3
-    N_SUPERVISION = 2 if DEBUG_MODE else 4
-    MIN_SUPERVISION_STEPS = 1 if DEBUG_MODE else 2
+    N_SUPERVISION = 2 if DEBUG_MODE else 6          # Increased from 4 to allow more pondering
+    MIN_SUPERVISION_STEPS = 1 if DEBUG_MODE else 2  # Force at least 2 steps before halting
     
     # ============== PonderNet Halting ==============
     HALTING_HIDDEN_DIM = D_MODEL  # Hidden dim for halting network MLP
-    LAMBDA_P = 0.25               # Geometric prior (~4 expected steps)
-    REG_LOSS_WEIGHT = 0.1         # Increased 10x to prevent early-halting collapse
+    LAMBDA_P = 0.2                # Geometric prior (1/0.2 = 5 expected steps)
+    REG_LOSS_WEIGHT = 0.05        # Reduced from 0.1; was overwhelming rec_loss
     HALTING_LR_MULTIPLIER = 0.1   # Separate LR for halting network
     
     # ============== Generation Settings ==============
@@ -44,13 +44,13 @@ class PureReasoningConfig:
     
     # ============== Training ==============
     BATCH_SIZE = 16 if DEBUG_MODE else 8
-    LEARNING_RATE = 1e-3 if DEBUG_MODE else 3e-4  # Higher LR for debug
+    LEARNING_RATE = 1e-3 if DEBUG_MODE else 1e-4   # Lower LR for stability
     WEIGHT_DECAY = 0.01
-    WARMUP_STEPS = 100 if DEBUG_MODE else 1000
+    WARMUP_STEPS = 100 if DEBUG_MODE else 2000     # Longer warmup
     EPOCHS = 10 if DEBUG_MODE else 40
     GRADIENT_CLIP = 1.0
-    DROPOUT = 0.3                # Increased for better regularization
-    LABEL_SMOOTHING = 0.1         # Prevent overconfident predictions
+    DROPOUT = 0.3                # Regularization
+    LABEL_SMOOTHING = 0.1        # Prevent overconfident predictions
     
     # Curriculum: warmup reasoning gradually
     WARMUP_REASONING_EPOCHS = 2 if DEBUG_MODE else 5

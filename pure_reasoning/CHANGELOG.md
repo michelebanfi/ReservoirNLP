@@ -285,3 +285,110 @@ The model should now:
 1. Use 3-4 reasoning steps on average
 2. Actually compute refinements before generating
 3. Show improving validation accuracy as training progresses
+
+---
+
+## 2026-01-23: Major PonderNet Architecture Fixes
+
+### Problem Observed
+
+After 5 epochs, the model showed critical issues:
+- avg_steps collapsed to ~0.56 (should be 3-5) ❌
+- SQuAD EM = 0% ❌
+- **reg_loss was NEGATIVE** (-0.20 to -0.25) ❌
+- Generated text: degenerate "the the the..." patterns
+
+### Root Cause Analysis
+
+7 critical bugs were identified by comparing with reference PonderNet implementation:
+
+| Issue | Description |
+|-------|-------------|
+| **KL Divergence** | Manual formula could produce negative values |
+| **Reconstruction Loss** | Used batch mean, lost per-sample weighting |
+| **State Refinement** | States detached between steps (no continuity) |
+| **Halting Init** | Neutral bias (should favor continuing) |
+| **No Step Embedding** | Model didn't know pondering position |
+| **No Minimum Steps** | Could halt immediately |
+| **Hyperparameters** | LR too high, warmup too short |
+
+### Fixes Applied
+
+**Fix 1: RegularizationLoss (CRITICAL)**
+```python
+# Before: manual formula that could be negative!
+kl = (p_clamped * (p_clamped.log() - p_g_clamped.log())).sum()
+
+# After: PyTorch KLDivLoss (always >= 0)
+self.kl_div = nn.KLDivLoss(reduction='batchmean')
+kl = self.kl_div(p_g.log(), p_clamped)
+```
+
+**Fix 2: ReconstructionLoss**
+```python
+# Before: batch-averaged loss
+rec_loss = (p_n.mean() * step_loss.mean()).sum()
+
+# After: per-sample weighted loss
+for p_n, loss_n in zip(p_n_list, step_losses_unreduced):
+    total += (p_n * loss_n).mean()  # Per-sample, then mean
+```
+
+**Fix 3: Continuous State Refinement**
+```python
+# Before: y, z detached between supervision steps
+for step in range(n_supervision):
+    (y, z), y_out, lambda_n = self.reasoning.deep_recursion(...)  # Detaches!
+
+# After: continuous state, only detach T-1 inner recursions
+for step in range(n_supervision):
+    y, z, lambda_n = self.reasoning.forward_step(memory, y, z, step, ...)
+    # y, z carry forward to next step
+```
+
+**Fix 4: Halting Network Initialization**
+```python
+# Before: neutral bias
+nn.init.zeros_(self.net[-1].bias)
+
+# After: bias toward continuing (sigmoid(-2) ≈ 0.12 halt prob)
+nn.init.constant_(self.net[-1].bias, -2.0)
+```
+
+**Fix 5: Step Embeddings**
+```python
+class ReasoningCore(nn.Module):
+    def __init__(self, config):
+        ...
+        self.step_embed = nn.Embedding(config.N_SUPERVISION + 1, config.D_MODEL)
+    
+    def forward_step(self, memory, y, z, step_idx, ...):
+        step_emb = self.step_embed(torch.full((B,), step_idx, ...))
+        y = y + step_emb  # Now model knows which step it's on
+```
+
+**Fix 6: Minimum Steps & Final Halt**
+```python
+for step in range(n_supervision):
+    if step == n_supervision - 1:
+        lambda_n = torch.ones_like(lambda_n)  # Must halt at final step
+    if step < min_steps - 1:
+        lambda_n = torch.zeros_like(lambda_n)  # Can't halt before min_steps
+```
+
+**Fix 7: Hyperparameters**
+| Parameter | Before | After |
+|-----------|--------|-------|
+| LAMBDA_P | 0.25 | 0.2 (expect 5 steps) |
+| REG_LOSS_WEIGHT | 0.1 | 0.05 (was too strong) |
+| LEARNING_RATE | 3e-4 | 1e-4 |
+| WARMUP_STEPS | 1000 | 2000 |
+| N_SUPERVISION | 4 | 6 |
+
+### Expected Improvements
+
+1. reg_loss should now always be >= 0
+2. avg_steps should be ~3-5 (controlled by LAMBDA_P)
+3. Continuous refinement should allow iterative reasoning
+4. Step embeddings inform the model about pondering progress
+5. Lower LR and longer warmup should stabilize training

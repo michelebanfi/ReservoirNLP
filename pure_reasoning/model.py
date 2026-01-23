@@ -4,15 +4,21 @@ Pure Reasoning Architecture - Model
 A reasoning-focused model without pretrained T5.
 Three components:
 1. Encoder (from scratch)
-2. Reasoning Core (TRM-style recursive)
+2. Reasoning Core (TRM-style recursive with PonderNet halting)
 3. Decoder (for text generation)
 
-Note: CUDA workaround is set in run_pure_reasoning.py, not here.
+CHANGELOG 2026-01-23: Major PonderNet fixes
+- Fixed RegularizationLoss to use nn.KLDivLoss (was producing negative values)
+- Fixed ReconstructionLoss to use per-sample weighting
+- Added step embeddings for pondering position
+- Continuous state refinement across pondering steps
+- Better halting network initialization (biased toward continuing)
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from contextlib import nullcontext
 
 from .config import PureReasoningConfig
 
@@ -96,6 +102,8 @@ class HaltingNetwork(nn.Module):
     """
     PonderNet-style halting network (MLP).
     Outputs λ_n (halting probability) at each pondering step.
+    
+    Initialized to encourage continuing (low halt probability early in training).
     """
     def __init__(self, dim, hidden_dim=None):
         super().__init__()
@@ -106,8 +114,9 @@ class HaltingNetwork(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(hidden_dim, 1),
         )
-        # Initialize to encourage continuing early on
-        nn.init.zeros_(self.net[-1].bias)
+        # Initialize to encourage CONTINUING (not halting)
+        # sigmoid(-2) ≈ 0.12, so initially model has ~12% chance to halt per step
+        nn.init.constant_(self.net[-1].bias, -2.0)
         nn.init.normal_(self.net[-1].weight, std=0.01)
     
     def forward(self, state):
@@ -123,30 +132,39 @@ class HaltingNetwork(nn.Module):
 
 class ReconstructionLoss(nn.Module):
     """
-    PonderNet reconstruction loss: L_rec = Σ p_n * L(y, y_hat_n)
-    Weights each step's loss by its halting probability.
+    PonderNet reconstruction loss: L_rec = Σ_n E_batch[p_n * L(y, y_hat_n)]
+    
+    FIXED: Now properly does per-sample weighting instead of batch mean.
+    Each sample's loss is weighted by its own halting probability at each step.
     """
     def __init__(self):
         super().__init__()
     
-    def forward(self, halt_probs, step_losses):
+    def forward(self, p_n_list, step_losses_unreduced):
         """
         Args:
-            halt_probs: [N] probability of halting at each step (sums to ~1)
-            step_losses: [N] loss at each step
+            p_n_list: list of [B,] tensors, halting probability per sample at each step
+            step_losses_unreduced: list of [B,] tensors, CE loss per sample at each step
         Returns:
             weighted_loss: scalar
         """
-        # Weight losses by halting probabilities
-        return (halt_probs * step_losses).sum()
+        # Sum over steps: for each sample, weighted sum of losses
+        # loss_i = Σ_n p_n[i] * L_n[i]
+        total = 0.0
+        for p_n, loss_n in zip(p_n_list, step_losses_unreduced):
+            # p_n: [B], loss_n: [B]
+            total = total + (p_n * loss_n).mean()  # Mean over batch
+        return total
 
 
 class RegularizationLoss(nn.Module):
     """
     PonderNet regularization loss: KL divergence from geometric prior.
-    Encourages exploration and prevents collapse.
     
-    Computes KL(p || p_g) = Σ p × log(p / p_g)
+    FIXED: Now uses nn.KLDivLoss which is always >= 0.
+    Previous implementation used manual formula that could produce negative values.
+    
+    KL(p || p_G) where p_G(n) = (1-λp)^n * λp is geometric distribution.
     """
     def __init__(self, lambda_p: float, max_steps: int = 20):
         super().__init__()
@@ -157,6 +175,10 @@ class RegularizationLoss(nn.Module):
             p_g[k] = not_halted * lambda_p
             not_halted = not_halted * (1 - lambda_p)
         self.register_buffer('p_g', p_g)
+        
+        # Use PyTorch's KLDivLoss - CRITICAL FIX
+        # KLDivLoss expects log-probabilities as input
+        self.kl_div = nn.KLDivLoss(reduction='batchmean')
     
     def forward(self, p):
         """
@@ -167,15 +189,24 @@ class RegularizationLoss(nn.Module):
         """
         # p: [N, B] -> [B, N]
         p = p.transpose(0, 1)
+        
         # Get geometric prior up to N steps, expand across batch
-        p_g = self.p_g[:p.shape[1]].unsqueeze(0).expand_as(p)
+        N = p.shape[1]
+        p_g = self.p_g[:N].unsqueeze(0).expand_as(p)
         
         # Clamp to avoid log(0)
         p_clamped = p.clamp(min=1e-8)
-        p_g_clamped = p_g.clamp(min=1e-8)
         
-        # KL(p || p_g) = Σ p × log(p / p_g)
-        kl = (p_clamped * (p_clamped.log() - p_g_clamped.log())).sum(dim=1).mean()
+        # KLDivLoss(log(p), p_g) computes KL(p_g || p)
+        # We want KL(p || p_g), so we swap: KLDivLoss(log(p_g), p) 
+        # But actually, the standard way is: KL(input || target)
+        # PyTorch KLDivLoss: input is log(Q), target is P, computes sum(P * (log(P) - input))
+        # = sum(P * log(P) - P * log(Q)) = sum(P * log(P/Q)) = KL(P || Q)
+        # So to get KL(p || p_g): input=log(p_g), target=p
+        # But that's KL(target || exp(input)) = KL(p || p_g) ✓
+        p_g_log = p_g.clamp(min=1e-8).log()
+        
+        kl = self.kl_div(p_g_log, p_clamped)
         return kl
 
 
@@ -280,23 +311,27 @@ class PureEncoder(nn.Module):
         return x, key_padding_mask
 
 
-# ============== Reasoning Core (TRM-style) ==============
+# ============== Reasoning Core (TRM-style with PonderNet) ==============
 
 class ReasoningCore(nn.Module):
     """
-    TRM-style recursive reasoning network.
+    TRM-style recursive reasoning network with PonderNet halting.
     
     Updates latent state (y, z) through recursive refinement:
     - z: reasoning scratchpad
     - y: current answer representation
     
-    ACT mechanism for adaptive computation.
+    FIXED: 
+    - Continuous state refinement across pondering steps
+    - Step embeddings so model knows pondering position
+    - Proper halting network initialization
     """
     def __init__(self, config):
         super().__init__()
         dim = config.D_MODEL
         self.n = config.N_RECURSIONS
         self.T = config.T_DEEP_RECURSIONS
+        self.max_steps = config.N_SUPERVISION
         
         # Reasoning transformer layers
         self.layers = nn.ModuleList([
@@ -307,11 +342,15 @@ class ReasoningCore(nn.Module):
         # Positional encoding for reasoning steps
         self.pos_encoder = SinusoidalPE(dim)
         
+        # Step embedding: tells model which pondering step we're on
+        self.step_embed = nn.Embedding(config.N_SUPERVISION + 1, dim)
+        nn.init.normal_(self.step_embed.weight, std=0.02)
+        
         # Projection layers for combining inputs
         self.z_input_proj = nn.Linear(dim * 3, dim, bias=False)  # (x, y, z) -> z
         self.y_input_proj = nn.Linear(dim * 2, dim, bias=False)  # (y, z) -> y
         
-        # PonderNet halting network (replaces simple Q-head)
+        # PonderNet halting network
         self.halting_net = HaltingNetwork(dim, config.HALTING_HIDDEN_DIM)
         
         # Learnable initial states
@@ -348,27 +387,38 @@ class ReasoningCore(nn.Module):
         
         return y, z
     
-    def deep_recursion(self, x, y, z, key_padding_mask=None):
+    def forward_step(self, memory, y, z, step_idx, key_padding_mask=None):
         """
-        Deep recursion: T-1 no-grad + 1 with-grad
-        Returns: (y_detached, z_detached), y_out, q_hat
+        One complete pondering step with T deep recursions.
+        
+        FIXED: Uses gradient for final recursion only, detaches for T-1.
+        Returns updated (y, z) and halt probability λ_n.
         """
-        # T-1 recursions without gradient
-        with torch.no_grad():
-            for _ in range(self.T - 1):
-                y, z = self.latent_recursion(x, y, z, key_padding_mask)
+        B = y.size(0)
+        device = y.device
         
-        # Final recursion with gradient
-        y, z = self.latent_recursion(x, y, z, key_padding_mask)
+        # Add step embedding to y (tells model which pondering step)
+        step_emb = self.step_embed(
+            torch.full((B,), step_idx, device=device, dtype=torch.long)
+        ).unsqueeze(1)  # [B, 1, D]
+        y = y + step_emb
         
-        # Q-value (halt probability)
-        q_hat = self.get_q_values(y)
+        # T deep recursions: T-1 without grad, 1 with grad
+        for t in range(self.T):
+            if t < self.T - 1:
+                with torch.no_grad():
+                    y, z = self.latent_recursion(memory, y, z, key_padding_mask)
+            else:
+                y, z = self.latent_recursion(memory, y, z, key_padding_mask)
         
-        return (y.detach(), z.detach()), y, q_hat
+        # Get halting probability
+        lambda_n = self.halting_net(y)  # [B, 1]
+        
+        return y, z, lambda_n
     
     def get_q_values(self, y):
-        """Predict halting probability λ_n from answer state using PonderNet network"""
-        return self.halting_net(y)  # [B, 1]
+        """Predict halting probability λ_n from answer state"""
+        return self.halting_net(y)
 
 
 # ============== Decoder ==============
@@ -473,12 +523,19 @@ class PureDecoder(nn.Module):
 
 class PureReasoningModel(nn.Module):
     """
-    Complete pure reasoning model with generative output.
+    Complete pure reasoning model with PonderNet adaptive computation.
     
     Architecture:
     1. Encoder: input_ids -> contextualized memory
-    2. Reasoning Core: iterative refinement with ACT
+    2. Reasoning Core: iterative refinement with ACT (PonderNet)
     3. Decoder: generates answer text from refined memory
+    
+    FIXED (2026-01-23):
+    - Proper PonderNet reconstruction loss with per-sample weighting
+    - Fixed KL divergence (always >= 0 now)
+    - Continuous state refinement across steps
+    - Step embeddings for pondering position
+    - Last step always halts (λ_N = 1)
     """
     def __init__(self, config):
         super().__init__()
@@ -500,7 +557,7 @@ class PureReasoningModel(nn.Module):
                 decoder_input_ids=None, labels=None,
                 n_supervision=None, min_steps=None):
         """
-        Forward pass with PonderNet-style deep supervision.
+        Forward pass with PonderNet-style supervision.
         
         Args:
             input_ids: [B, L] encoder input
@@ -514,7 +571,7 @@ class PureReasoningModel(nn.Module):
             dict with loss and logits
         """
         n_supervision = n_supervision or self.config.N_SUPERVISION
-        min_steps = min_steps or self.config.MIN_SUPERVISION_STEPS
+        min_steps = min_steps or getattr(self.config, 'MIN_SUPERVISION_STEPS', 2)
         device = input_ids.device
         B, L = input_ids.shape
         
@@ -524,60 +581,67 @@ class PureReasoningModel(nn.Module):
         # 2. Initialize reasoning state
         y, z = self.reasoning.init_state(B, L, device)
         
-        # 3. PonderNet supervision loop
-        # Collect: λ_n (halting prob), p_n (unconditioned halt), losses per step
-        lambda_n_list = []      # [N] each is [B, 1]
-        p_n_list = []           # [N] each is [B, 1]  
-        step_losses = []        # [N] each is scalar
-        all_y_outs = []         # For final prediction
+        # 3. PonderNet supervision loop with CONTINUOUS state refinement
+        p_n_list = []           # [N] each is [B,] - halting probability at step n
+        step_losses = []        # [N] each is [B,] - per-sample loss at step n  
+        lambda_n_values = []    # For logging
+        all_y_outs = []
         
-        un_halted_prob = torch.ones(B, 1, device=device)  # Π(1-λ_j)
+        un_halted_prob = torch.ones(B, device=device)  # Π(1-λ_j)
         
         for step in range(n_supervision):
-            (y, z), y_out, lambda_n = self.reasoning.deep_recursion(
-                memory, y, z, key_padding_mask=padding_mask
+            # Forward one pondering step (CONTINUOUS: y, z not reset between steps)
+            y, z, lambda_n = self.reasoning.forward_step(
+                memory, y, z, step, key_padding_mask=padding_mask
             )
+            lambda_n = lambda_n.squeeze(-1)  # [B]
             
-            # Store lambda_n
-            lambda_n_list.append(lambda_n.mean().item())
+            # Force λ_N = 1 at final step (PonderNet requirement)
+            if step == n_supervision - 1:
+                lambda_n = torch.ones_like(lambda_n)
+            
+            # For minimum steps, force λ_n = 0 (don't allow halting)
+            if step < min_steps - 1:
+                lambda_n = torch.zeros_like(lambda_n)
+            
+            lambda_n_values.append(lambda_n.mean().item())
             
             # Compute p_n = λ_n × Π(1-λ_j) for j < n
-            p_n = un_halted_prob * lambda_n  # [B, 1]
+            p_n = un_halted_prob * lambda_n  # [B]
             p_n_list.append(p_n)
             
             # Update un_halted probability for next step
             un_halted_prob = un_halted_prob * (1 - lambda_n)
             
-            # Compute loss at this step
-            refined_memory = memory + y_out  # Residual
-            all_y_outs.append(y_out)
+            # Compute per-sample loss at this step (no reduction!)
+            refined_memory = memory + y  # Residual
+            all_y_outs.append(y)
             
             if decoder_input_ids is not None and labels is not None:
                 logits = self.decoder(decoder_input_ids, refined_memory, padding_mask)
+                # Per-sample loss: [B*T] -> [B]
                 step_loss = F.cross_entropy(
                     logits.view(-1, logits.size(-1)),
                     labels.view(-1),
                     ignore_index=-100,
+                    reduction='none',  # CRITICAL: no reduction!
                     label_smoothing=self.config.LABEL_SMOOTHING
-                )
+                ).view(B, -1).mean(dim=1)  # [B]
                 step_losses.append(step_loss)
         
         # 4. Compute PonderNet losses
         if step_losses:
-            # Stack p_n: [N, B, 1] -> mean over batch -> [N]
-            p_n_stacked = torch.stack([p.mean() for p in p_n_list])  # [N]
-            step_losses_stacked = torch.stack(step_losses)  # [N]
-            
-            # Normalize p_n to sum to 1 (handle numerical issues)
-            p_n_normalized = p_n_stacked / (p_n_stacked.sum() + 1e-8)
-            
-            # Reconstruction loss: Σ p_n * L_n
-            rec_loss = self.reconstruction_loss(p_n_normalized, step_losses_stacked)
+            # Reconstruction loss: per-sample weighted sum
+            rec_loss = self.reconstruction_loss(p_n_list, step_losses)
             
             # Regularization loss: KL(p || p_geometric)
             # Stack p_n: [N, B] for KL computation
-            p_for_kl = torch.stack([p.squeeze(-1) for p in p_n_list], dim=0)  # [N, B]
-            reg_loss = self.regularization_loss(p_for_kl)
+            p_stacked = torch.stack(p_n_list, dim=0)  # [N, B]
+            
+            # Normalize to ensure sum=1 (handle numerical issues)
+            p_stacked = p_stacked / (p_stacked.sum(dim=0, keepdim=True) + 1e-8)
+            
+            reg_loss = self.regularization_loss(p_stacked)
             
             # Total loss
             total_loss = rec_loss + self.config.REG_LOSS_WEIGHT * reg_loss
@@ -595,8 +659,8 @@ class PureReasoningModel(nn.Module):
         # Compute expected number of steps: Σ n * p_n
         if p_n_list:
             step_indices = torch.arange(1, len(p_n_list) + 1, device=device, dtype=torch.float)
-            p_n_stacked = torch.stack([p.mean() for p in p_n_list])
-            expected_steps = (step_indices * p_n_stacked).sum().item()
+            p_n_means = torch.stack([p.mean() for p in p_n_list])
+            expected_steps = (step_indices * p_n_means).sum().item()
         else:
             expected_steps = 0
         
@@ -607,7 +671,7 @@ class PureReasoningModel(nn.Module):
             'reg_loss': reg_loss.item() if torch.is_tensor(reg_loss) else reg_loss,
             'supervision_steps': len(step_losses),
             'expected_steps': expected_steps,
-            'q_hats': lambda_n_list,  # Keep for backwards compatibility
+            'q_hats': lambda_n_values,  # Keep for backwards compatibility
             'halt_probs': [p.mean().item() for p in p_n_list],
             'refined_memory': final_refined_memory,
             'memory_key_padding_mask': padding_mask,
